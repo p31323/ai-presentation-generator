@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -57,7 +58,12 @@ import { GoogleGenAI, Type } from "@google/genai";
 import PptxGenJS from 'pptxgenjs';
 
 // Shim for process.env in browser environment
-window.process = window.process || { env: {} };
+// Netlify will inject environment variables here.
+if (typeof window.process === 'undefined') {
+  window.process = { env: {} };
+}
+const apiKey = window.process.env.API_KEY;
+
 
 // ===================================
 // INLINED: types.ts
@@ -225,7 +231,7 @@ const DynamicIcon = ({ name, className }) => {
 // INLINED: services/*
 // ===================================
 // --- Start of geminiService.ts ---
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: apiKey });
 function cleanJsonString(text) {
     let cleanedText = text.trim();
     const match = cleanedText.match(/```json\s*([\s\S]*?)\s*```/);
@@ -1466,16 +1472,32 @@ const App = () => {
 // ===================================
 // Final Render Call
 // ===================================
-const rootElement = document.getElementById('root');
-if (!rootElement) {
-  throw new Error("Could not find root element to mount to");
+// A quick check to make sure the API key is set before rendering
+const keyChecker = () => {
+    const rootElement = document.getElementById('root');
+    if (!rootElement) {
+      throw new Error("找不到掛載的根元素");
+    }
+
+    if (!apiKey) {
+        rootElement.innerHTML = `
+            <div style="font-family: sans-serif; text-align: center; padding: 2rem; color: #fecaca; background-color: #7f1d1d; border: 1px solid #dc2626; border-radius: 0.5rem; max-width: 600px; margin: 2rem auto;">
+                <h2 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 1rem;">設定錯誤</h2>
+                <p>API 金鑰未設定。請依照教學，在 Netlify 的環境變數中設定您的 API_KEY。</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    );
 }
-const root = ReactDOM.createRoot(rootElement);
-root.render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+
+keyChecker();
 
     </script>
 </body>
