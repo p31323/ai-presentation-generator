@@ -1,0 +1,8 @@
+{
+  "name": "AI 語音簡報生成器",
+  "description": "一個由 AI 驅動的工具，可將您的錄音轉換為精美、即用的簡報。",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "prompt": ""
+}

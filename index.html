@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 語音簡報生成器</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%236366f1'><path d='M4 3h16a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm2 4v2h12V7H6zm0 4v2h12v-2H6zm0 4v2h8v-2H6z'/></svg>">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'background': '#121212',
+              'surface': '#1e1e1e',
+              'primary': '#6366f1',
+              'primary-hover': '#4f46e5',
+              'secondary': '#a855f7',
+              'text-main': '#e5e7eb',
+              'text-secondary': '#9ca3af',
+              'border-color': '#374151',
+              'accent': '#10b981', // 用於 PDF 上傳等新功能
+            },
+            animation: {
+              'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #e5e7eb;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "@google/genai": "https://esm.sh/@google/genai@0.12.0",
+    "pptxgenjs": "https://esm.sh/pptxgenjs@3.12.0"
+  }
+}
+</script>
+<!-- In-browser JSX/TS transpiler -->
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel" data-type="module">
+import React, { useState, useRef, useCallback, useEffect } from 'react';
+import ReactDOM from 'react-dom/client';
+import { GoogleGenAI, Type } from "@google/genai";
+import PptxGenJS from 'pptxgenjs';
+
+// Shim for process.env in browser environment
+window.process = window.process || { env: {} };
+
+// ===================================
+// INLINED: types.ts
+// ===================================
+var LayoutType;
+(function (LayoutType) {
+    LayoutType["TITLE_WITH_SUBTITLE"] = "TITLE_WITH_SUBTITLE";
+    LayoutType["STANDARD"] = "STANDARD";
+    LayoutType["TEXT_WITH_IMAGE"] = "TEXT_WITH_IMAGE";
+    LayoutType["TITLE_WITH_IMAGE"] = "TITLE_WITH_IMAGE";
+    LayoutType["PROCESS"] = "PROCESS";
+    LayoutType["TIMELINE"] = "TIMELINE";
+    LayoutType["CHART_BAR"] = "CHART_BAR";
+    LayoutType["CHART_COMPARISON"] = "CHART_COMPARISON";
+    LayoutType["INFOGRAPHIC_PERCENTAGE"] = "INFOGRAPHIC_PERCENTAGE";
+    LayoutType["QUOTE"] = "QUOTE";
+    LayoutType["AGENDA"] = "AGENDA";
+    LayoutType["LIST_STYLE"] = "LIST_STYLE";
+    LayoutType["TEAM_GRID"] = "TEAM_GRID";
+    LayoutType["COLUMNS_STYLE"] = "COLUMNS_STYLE";
+    LayoutType["QUAD_GRID"] = "QUAD_GRID";
+    LayoutType["INFOGRAPHIC_ICONS"] = "INFOGRAPHIC_ICONS";
+    LayoutType["INFOGRAPHIC_CIRCLES"] = "INFOGRAPHIC_CIRCLES";
+    LayoutType["THANK_YOU"] = "THANK_YOU";
+})(LayoutType || (LayoutType = {}));
+
+var AppState;
+(function (AppState) {
+    AppState[AppState["Idle"] = 0] = "Idle";
+    AppState[AppState["Recording"] = 1] = "Recording";
+    AppState[AppState["ProcessingAudio"] = 2] = "ProcessingAudio";
+    AppState[AppState["EditingOutline"] = 3] = "EditingOutline";
+    AppState[AppState["GeneratingPresentation"] = 4] = "GeneratingPresentation";
+    AppState[AppState["Finished"] = 5] = "Finished";
+    AppState[AppState["Error"] = 6] = "Error";
+})(AppState || (AppState = {}));
+
+
+// ===================================
+// INLINED: components/icons.tsx
+// ===================================
+const MicIcon = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+  </svg>
+);
+const StopIcon = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 24 24" fill="currentColor">
+    <path fillRule="evenodd" d="M4.5 7.5a3 3 0 013-3h9a3 3 0 013 3v9a3 3 0 01-3 3h-9a3 3 0 01-3-3v-9z" clipRule="evenodd" />
+  </svg>
+);
+const PresentationIcon = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+  </svg>
+);
+const DownloadIcon = ({ className }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+  </svg>
+);
+const RetryIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M20 20v-5h-5M4 4l1.5 1.5A9 9 0 0120.5 12M20 20l-1.5-1.5A9 9 0 003.5 12" />
+    </svg>
+);
+const UploadIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+    </svg>
+);
+const MagicWandIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 15l-1.813-1.813a2 2 0 010-2.828L13.172 4.343a2 2 0 012.828 0l1.813 1.813a2 2 0 010 2.828L11.657 15.904a2 2 0 01-1.844 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v2.5M3 5h2.5M16 21v-2.5m2.5 0H16m-5-11l-1-1m5 5l-1-1m-3 7l-1-1m-6-10l2.5 2.5" />
+    </svg>
+);
+const TrashIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+    </svg>
+);
+const AddIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+const MinusCircleIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 12H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+const QuoteIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 24 24">
+      <path d="M6 17h3l2-4V7H5v6h3l-2 4zm8 0h3l2-4V7h-6v6h3l-2 4z"/>
+    </svg>
+);
+const UserGroupIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.124-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.124-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+    </svg>
+);
+const CheckCircleIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+);
+const DragHandleIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="currentColor" viewBox="0 0 20 20">
+        <path d="M5 5a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM7 4a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H7ZM5 10a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm2-1a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H7ZM5 15a1 1 0 1 1-2 0 1 1 0 0 1 2 0Zm2-1a1 1 0 1 0 0 2h6a1 1 0 1 0 0-2H7Z" />
+    </svg>
+);
+const TemplateIcon = ({ className }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+    </svg>
+);
+const LightbulbIcon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 017.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>);
+const ShieldCheckIcon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>);
+const CogIcon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>);
+const ChartBarIcon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>);
+const UsersIcon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>);
+const GlobeAltIcon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9V3m0 18a9 9 0 009-9m-9 9a9 9 0 00-9-9" /></svg>);
+const ServerIcon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg>);
+const AcademicCapIcon = ({ className }) => (<svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path d="M12 14l9-5-9-5-9 5 9 5z" /><path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /><path strokeLinecap="round" strokeLinejoin="round" d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14zm-4 6v-7.5l4-2.222 4 2.222V20M1 12v5a2 2 0 002 2h18a2 2 0 002-2v-5" /></svg>);
+
+const iconMap = {
+    'lightbulb': LightbulbIcon,
+    'shield-check': ShieldCheckIcon,
+    'cog': CogIcon,
+    'chart-bar': ChartBarIcon,
+    'users': UsersIcon,
+    'globe-alt': GlobeAltIcon,
+    'server': ServerIcon,
+    'academic-cap': AcademicCapIcon,
+    'user-group': UserGroupIcon,
+    'check-circle': CheckCircleIcon,
+    'presentation': PresentationIcon,
+};
+
+const iconSVGs = {
+    'lightbulb': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 017.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>',
+    'shield-check': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>',
+    'cog': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>',
+    'chart-bar': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>',
+    'users': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21a6 6 0 00-9-5.197M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>',
+    'globe-alt': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9V3m0 18a9 9 0 009-9m-9 9a9 9 0 00-9-9" /></svg>',
+    'server': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg>',
+    'academic-cap': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path d="M12 14l9-5-9-5-9 5 9 5z" /><path d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 14l9-5-9-5-9 5 9 5zm0 0l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14zm-4 6v-7.5l4-2.222 4 2.222V20M1 12v5a2 2 0 002 2h18a2 2 0 002-2v-5" /></svg>',
+    'user-group': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.124-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.124-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>',
+    'check-circle': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>',
+    'presentation': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>',
+};
+
+const DynamicIcon = ({ name, className }) => {
+    const IconComponent = iconMap[name];
+    if (!IconComponent) {
+        return <PresentationIcon className={className} />; // Fallback icon
+    }
+    return <IconComponent className={className} />;
+};
+
+
+// ===================================
+// INLINED: services/*
+// ===================================
+// --- Start of geminiService.ts ---
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+function cleanJsonString(text) {
+    let cleanedText = text.trim();
+    const match = cleanedText.match(/```json\s*([\s\S]*?)\s*```/);
+    if (match && match[1]) {
+        cleanedText = match[1].trim();
+    }
+    const firstBracket = cleanedText.indexOf('[');
+    const lastBracket = cleanedText.lastIndexOf(']');
+    if (firstBracket !== -1 && lastBracket > firstBracket) {
+        const firstBraceInArrayContext = cleanedText.indexOf('{');
+        if (firstBraceInArrayContext === -1 || firstBracket < firstBraceInArrayContext) {
+           return cleanedText.substring(firstBracket, lastBracket + 1);
+        }
+    }
+    const firstBrace = cleanedText.indexOf('{');
+    if (firstBrace !== -1) {
+        const lastBrace = cleanedText.lastIndexOf('}');
+        if (lastBrace > firstBrace) {
+            return cleanedText.substring(firstBrace, lastBrace + 1);
+        }
+    }
+    return cleanedText;
+}
+const fileToGenerativePart = async (file) => {
+  const base64EncodedDataPromise = new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve((reader.result).split(',')[1]);
+    reader.readAsDataURL(file);
+  });
+  return {
+    inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
+  };
+}
+const availableIcons = ['lightbulb', 'shield-check', 'cog', 'chart-bar', 'users', 'globe-alt', 'server', 'academic-cap', 'user-group', 'check-circle', 'presentation'];
+const baseSlideSchemaProperties = {
+    notes: { type: Type.STRING, description: "投影片的講者備註。簡要說明此投影片的演講要點。" },
+    imagePrompt: { type: Type.STRING, description: "一個簡短、描述性的英文提示詞，用於為此投影片生成一張相關圖片。例如：'A futuristic cityscape at sunset' 或 'Two people collaborating on a whiteboard'。" }
+};
+const standardLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['STANDARD'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "投影片的標題。應簡潔有力。" }, content: { type: Type.ARRAY, items: { type: Type.STRING }, description: "投影片內容的項目符號陣列。"}, ...baseSlideSchemaProperties }, required: ["title", "content"] }}, required: ["layout", "data"] };
+const processLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['PROCESS'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "流程圖的總標題。" }, steps: { type: Type.ARRAY, description: "流程中的步驟陣列。", items: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "此步驟的標題。" }, description: { type: Type.STRING, description: "此步驟的簡短描述。" } }, required: ["title", "description"] } }, ...baseSlideSchemaProperties }, required: ["title", "steps"] }}, required: ["layout", "data"] };
+const chartBarLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['CHART_BAR'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "圖表的總標題。" }, data: { type: Type.ARRAY, description: "圖表的數據點陣列。", items: { type: Type.OBJECT, properties: { label: { type: Type.STRING, description: "數據點的標籤 (X 軸)。" }, value: { type: Type.NUMBER, description: "數據點的數值 (Y 軸)。" } }, required: ["label", "value"] } }, ...baseSlideSchemaProperties }, required: ["title", "data"] }}, required: ["layout", "data"] };
+const timelineLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['TIMELINE'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "時間軸的總標題。" }, events: { type: Type.ARRAY, description: "時間軸上的事件陣列。", items: { type: Type.OBJECT, properties: { year: { type: Type.STRING, description: "事件發生的年份或日期。" }, text: { type: Type.STRING, description: "事件的簡短描述。" } }, required: ["year", "text"] } }, ...baseSlideSchemaProperties }, required: ["title", "events"] }}, required: ["layout", "data"] };
+const quoteLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['QUOTE'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "引言投影片的標題，例如 '今日名言' 或 '核心價值'。" }, quote: { type: Type.STRING, description: "引用的主要文字內容。" }, author: { type: Type.STRING, description: "引言的作者或來源。" }, ...baseSlideSchemaProperties }, required: ["title", "quote", "author"] }}, required: ["layout", "data"] };
+const textWithImageLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['TEXT_WITH_IMAGE'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING, description: "投影片的標題。" }, content: { type: Type.ARRAY, items: { type: Type.STRING }, description: "投影片內容的項目符號陣列，將會顯示在圖片旁邊。" }, ...baseSlideSchemaProperties }, required: ["title", "content", "imagePrompt"] }}, required: ["layout", "data"] };
+const titleWithSubtitleLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['TITLE_WITH_SUBTITLE'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, subtitle: { type: Type.STRING }, ...baseSlideSchemaProperties }, required: ["title", "subtitle"] }}, required: ["layout", "data"] };
+const agendaLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['AGENDA'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, items: { type: Type.ARRAY, items: { type: Type.STRING }}, ...baseSlideSchemaProperties }, required: ["title", "items"] }}, required: ["layout", "data"] };
+const teamGridLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['TEAM_GRID'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, members: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { name: { type: Type.STRING }, title: { type: Type.STRING }}, required: ["name", "title"] }}, ...baseSlideSchemaProperties }, required: ["title", "members"] }}, required: ["layout", "data"] };
+const infographicIconsLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['INFOGRAPHIC_ICONS'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, items: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }, icon: {type: Type.STRING, description: `Icon name from this list: ${availableIcons.join(', ')}`} }, required: ["text", "icon"] }}, ...baseSlideSchemaProperties }, required: ["title", "items"] }}, required: ["layout", "data"] };
+const titleWithImageLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['TITLE_WITH_IMAGE'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, ...baseSlideSchemaProperties }, required: ["title", "imagePrompt"] }}, required: ["layout", "data"] };
+const infographicPercentageLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['INFOGRAPHIC_PERCENTAGE'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, items: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { label: { type: Type.STRING }, value: { type: Type.NUMBER }}, required: ["label", "value"] }}, ...baseSlideSchemaProperties }, required: ["title", "items"] }}, required: ["layout", "data"] };
+const quadGridLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['QUAD_GRID'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, items: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, description: { type: Type.STRING }, icon: {type: Type.STRING, description: `Icon name from this list: ${availableIcons.join(', ')}`} }, required: ["title", "description"] }, maxItems: 4, minItems: 4}, ...baseSlideSchemaProperties }, required: ["title", "items"] }}, required: ["layout", "data"] };
+const columnsStyleLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['COLUMNS_STYLE'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, columns: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, content: { type: Type.ARRAY, items: { type: Type.STRING }}, icon: {type: Type.STRING, description: `Icon name from this list: ${availableIcons.join(', ')}`} }, required: ["title", "content"] }}, ...baseSlideSchemaProperties }, required: ["title", "columns"] }}, required: ["layout", "data"] };
+const infographicCirclesLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['INFOGRAPHIC_CIRCLES'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, items: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { text: { type: Type.STRING }}, required: ["text"] }}, ...baseSlideSchemaProperties }, required: ["title", "items"] }}, required: ["layout", "data"] };
+const chartComparisonLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['CHART_COMPARISON'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, seriesLabels: { type: Type.ARRAY, items: { type: Type.STRING }, minItems: 2, maxItems: 2 }, data: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: { label: { type: Type.STRING }, value1: { type: Type.NUMBER }, value2: { type: Type.NUMBER }}, required: ["label", "value1", "value2"] }}, ...baseSlideSchemaProperties }, required: ["title", "seriesLabels", "data"] }}, required: ["layout", "data"] };
+const listStyleLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['LIST_STYLE'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, items: { type: Type.ARRAY, items: { type: Type.STRING }}, ...baseSlideSchemaProperties }, required: ["title", "items"] }}, required: ["layout", "data"] };
+const thankYouLayoutSchema = { type: Type.OBJECT, properties: { layout: { type: Type.STRING, enum: ['THANK_YOU'] }, data: { type: Type.OBJECT, properties: { title: { type: Type.STRING }, subtitle: { type: Type.STRING }, ...baseSlideSchemaProperties }, required: ["title", "subtitle"] }}, required: ["layout", "data"] };
+const presentationSchema = {
+    type: Type.ARRAY,
+    items: {
+        oneOf: [
+            standardLayoutSchema, processLayoutSchema, chartBarLayoutSchema, timelineLayoutSchema, quoteLayoutSchema, textWithImageLayoutSchema,
+            titleWithSubtitleLayoutSchema, agendaLayoutSchema, teamGridLayoutSchema, infographicIconsLayoutSchema, titleWithImageLayoutSchema,
+            infographicPercentageLayoutSchema, quadGridLayoutSchema, columnsStyleLayoutSchema, infographicCirclesLayoutSchema,
+            chartComparisonLayoutSchema, listStyleLayoutSchema, thankYouLayoutSchema
+        ]
+    }
+};
+const getPromptText = () => {
+    return `分析提供的檔案內容，生成一份專業簡報。請根據內容的語意，為每張投影片從可用的版面中選擇最合適的一種。簡報應包含標題投影片、數張內容投影片及結論。以指定的 JSON 格式輸出結果，語言需與檔案內容一致。請確保輸出為單一、有效的 JSON 陣列，且所有字串值中的雙引號都已正確轉義（例如：\\"）。
+- 如果內容是分點說明，使用 'STANDARD' 版面。
+- 如果內容描述一個有多個步驟的過程，使用 'PROCESS' 版面。
+- 如果內容包含可比較的數據或統計資料，使用 'CHART_BAR' 版面。
+- 如果內容是按時間順序排列的事件或歷史，使用 'TIMELINE' 版面。
+- 如果內容包含一句強而有力的引言或名言，使用 'QUOTE' 版面。
+- 如果投影片的主要內容可以由一張大圖輔助說明，使用 'TEXT_WITH_IMAGE' 版面，並務必提供 imagePrompt。
+- 對於支援圖示的版面（INFOGRAPHIC_ICONS, QUAD_GRID, COLUMNS_STYLE），請為每個項目從可用圖示列表中選擇一個最合適的圖示名稱。可用圖示列表: ${availableIcons.join(', ')}。
+- 'INFOGRAPHIC_ICONS' 版面必須為每個項目提供一個圖示。
+為每張投影片提供一個適合生成圖片的英文提示詞(imagePrompt)，'TEXT_WITH_IMAGE' 版面尤其需要。`;
+};
+const generateSlidesFromFile = async (fileBlob) => {
+  let jsonText = '';
+  try {
+    const filePart = await fileToGenerativePart(fileBlob);
+    const textPart = { text: getPromptText() };
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: { parts: [filePart, textPart] },
+      config: { responseMimeType: "application/json", responseSchema: presentationSchema }
+    });
+    jsonText = cleanJsonString(response.text);
+    const slides = JSON.parse(jsonText);
+    if (!slides || !Array.isArray(slides) || slides.length === 0) {
+      throw new Error("AI 返回了空的或無效的投影片結構。");
+    }
+    return slides;
+  } catch (error) {
+    console.error("生成投影片時出錯:", error);
+    if (error instanceof SyntaxError) console.error("無法解析的 JSON 字串:", jsonText);
+    if (error instanceof Error) throw new Error(`生成簡報失敗: ${error.message}`);
+    throw new Error("生成簡報時發生未知錯誤。");
+  }
+};
+const getRefinePrompt = (action) => {
+    switch(action) {
+        case 'detail': return `請將以下 JSON 格式的簡報投影片內容變得更詳細和全面。擴展項目符號和描述的內容。保持原有的投影片數量和版面配置。請以相同的 JSON 格式回傳更新後的投影片。`;
+        case 'simplify': return `請簡化以下 JSON 格式的簡報投影片內容。讓標題和項目符號更簡潔、更易於理解。保持原有的投影片數量和版面配置。請以相同的 JSON 格式回傳更新後的投影片。`;
+        case 'increase': return `請擴展以下 JSON 格式的簡報，增加更多投影片。您可以將現有投影片拆分為多個新投影片，或根據上下文添加相關資訊的新投影片。目標是在合理的情況下增加2-3張投影片，並確保流程的邏輯性。請以相同的 JSON 格式回傳完整的、更新後的投影片列表。`;
+        case 'decrease': return `請精簡以下 JSON 格式的簡報，減少投影片數量。合併相關的投影片並移除次要的內容，使簡報更簡潔。目標是在合理的情況下減少2-3張投影片，並確保流程的邏輯性。請以相同的 JSON 格式回傳完整的、更新後的投影片列表。`;
+    }
+};
+const refineSlides = async (currentSlides, action) => {
+    let jsonText = '';
+    try {
+        const instruction = getRefinePrompt(action);
+        const currentSlidesJson = JSON.stringify(currentSlides.map(({id, imageUrl, ...rest}) => rest));
+        const prompt = `${instruction}\n\n請確保輸出為單一、有效的 JSON 陣列，且所有字串值中的雙引號都已正確轉義（例如：\\"）。\n\n這是目前的簡報 JSON:\n${currentSlidesJson}`;
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: { parts: [{text: prompt}] },
+            config: { responseMimeType: "application/json", responseSchema: presentationSchema }
+        });
+        jsonText = cleanJsonString(response.text);
+        const slides = JSON.parse(jsonText);
+        if (!slides || !Array.isArray(slides) || slides.length === 0) {
+          throw new Error("AI 為調整操作返回了空的或無效的投影片結構。");
+        }
+        return slides;
+    } catch (error) {
+        console.error(`使用操作 "${action}" 調整投影片時出錯:`, error);
+        if (error instanceof SyntaxError) console.error("無法解析的 JSON 字串:", jsonText);
+        if (error instanceof Error) throw new Error(`調整簡報失敗: ${error.message}`);
+        throw new Error("調整簡報時發生未知錯誤。");
+    }
+};
+const generateImageForSlide = async (prompt) => {
+  try {
+    const response = await ai.models.generateImages({
+        model: 'imagen-3.0-generate-002',
+        prompt: `A minimalist and professional vector illustration for a presentation slide about: "${prompt}". Clean background, abstract style.`,
+        config: { numberOfImages: 1, outputMimeType: 'image/png', aspectRatio: '16:9' }
+    });
+    if (response.generatedImages && response.generatedImages.length > 0 && response.generatedImages[0].image.imageBytes) {
+      return response.generatedImages[0].image.imageBytes;
+    } else {
+      throw new Error("API 未返回有效的圖片資料。");
+    }
+  } catch (error) {
+    console.error(`為提示詞 "${prompt}" 生成圖片時出錯:`, error);
+    throw error;
+  }
+};
+// --- End of geminiService.ts ---
+
+// --- Start of deploymentService.ts ---
+const deploymentThemes = {
+  dark: { bg: '1F2937', titleColor: '818CF8', textColor: 'F9FAFB', secondary: 'A855F7', footerColor: '9CA3AF', fontFace: 'Helvetica Neue' },
+  light: { bg: 'FFFFFF', titleColor: '3B82F6', textColor: '111827', secondary: '6D28D9', footerColor: '6B7280', fontFace: 'Helvetica Neue' },
+  corporate: { bg: 'F8FAFC', titleColor: '013E85', textColor: '011738', secondary: 'FFC400', footerColor: '64748B', fontFace: 'Arial' },
+  vibrant: { bg: '0F172A', titleColor: 'F472B6', textColor: 'E2E8F0', secondary: 'EC4899', footerColor: '94A3B8', fontFace: 'Courier New' },
+};
+
+const generateDeploymentHtml = (slides, theme) => {
+    const selectedTheme = deploymentThemes[theme] || deploymentThemes.dark;
+
+    const safeJsonForScriptTag = (data) => {
+        const jsonString = JSON.stringify(data);
+        return jsonString.replace(/<\/script>/gi, "<\\/script>");
+    };
+  
+    const slidesJson = safeJsonForScriptTag(slides);
+    const themeJson = safeJsonForScriptTag(selectedTheme);
+    const iconSvgsJson = safeJsonForScriptTag(iconSVGs);
+    
+    // This builds the viewer script without using a template literal for the script content itself.
+    // This is more robust and prevents parsing errors from nested templates.
+    const viewerScript = [
+        "const slides = JSON.parse(document.getElementById('slides-data').textContent);",
+        "const theme = JSON.parse(document.getElementById('theme-data').textContent);",
+        "const iconSVGs = JSON.parse(document.getElementById('icons-data').textContent);",
+        "const slideContentEl = document.getElementById('slide-content');",
+        "const prevButton = document.getElementById('prev-button');",
+        "const nextButton = document.getElementById('next-button');",
+        "const counterEl = document.getElementById('slide-counter');",
+        "let currentSlideIndex = 0;",
+
+        "function getIcon(name) {",
+        "  const svg = iconSVGs[name] || iconSVGs['presentation'] || '';",
+        "  const coloredSvg = svg.replace(/currentColor/g, '#' + theme.titleColor);",
+        "  return coloredSvg;",
+        "}",
+
+        "function renderSlide(index) {",
+        "  const slide = slides[index];",
+        "  if (!slide) return;",
+        "  let contentHtml = '';",
+        "  const data = slide.data;",
+        "  const title = 'title' in data ? data.title : '';",
+        "  const hasImage = !!(slide.imageUrl && slide.imageUrl.length > 0);",
+        "  const imagePosition = data.imagePosition || 'right';",
+        "  const isVerticalLayout = imagePosition === 'top' || imagePosition === 'bottom';",
+        "  const imageScale = (data.imageScale || 100) / 100;",
+        "  const imageElement = hasImage ? '<div class=\"flex items-center justify-center bg-gray-900 rounded-md overflow-hidden ' + (isVerticalLayout ? 'w-full h-1/2' : 'h-full w-1/2') + '\"><img src=\"data:image/png;base64,' + slide.imageUrl + '\" alt=\"AI generated image\" class=\"object-cover w-full h-full\" style=\"transform: scale(' + imageScale + ');\"/></div>' : '';",
+        "  const contentContainerClasses = 'flex flex-col justify-center p-8 ' + (hasImage ? (isVerticalLayout ? 'h-1/2' : 'w-1/2') : 'w-full');",
+        "  let slideContent = '';",
+
+        "  switch (slide.layout) {",
+        "    case 'STANDARD': case 'TEXT_WITH_IMAGE': case 'LIST_STYLE': case 'AGENDA':",
+        "      const items = data.content || data.items || [];",
+        "      const listItems = items.map(item => '<li class=\"text-xl\">' + item + '</li>').join('');",
+        "      slideContent = '<h3 class=\"text-4xl font-bold mb-6\" style=\"color: #' + theme.titleColor + ';\">' + title + '</h3><ul class=\"list-disc list-inside space-y-3\" style=\"color: #' + theme.textColor + ';\">' + listItems + '</ul>';",
+        "      break;",
+        "    case 'TITLE_WITH_SUBTITLE': case 'THANK_YOU':",
+        "      slideContent = '<div class=\"flex flex-col h-full justify-center items-center text-center\"><h3 class=\"text-6xl font-bold\" style=\"color: #' + theme.titleColor + ';\">' + data.title + '</h3><p class=\"text-3xl mt-4\" style=\"color: #' + theme.footerColor + ';\">' + data.subtitle + '</p></div>';",
+        "      break;",
+        "    case 'TITLE_WITH_IMAGE':",
+        "      slideContent = '<div class=\"flex flex-col h-full justify-center items-center text-center\"><h3 class=\"text-5xl font-bold\" style=\"color: #' + theme.titleColor + ';\">' + data.title + '</h3></div>';",
+        "      break;",
+        "    case 'QUOTE':",
+        "      slideContent = '<div class=\"flex flex-col h-full justify-center text-center\"><div class=\"relative\"><span class=\"absolute -top-8 left-0 text-9xl opacity-10\" style=\"color: #' + theme.titleColor + ';\">“</span><blockquote class=\"relative text-4xl italic p-4\">\"' + data.quote + '\"</blockquote></div><cite class=\"mt-4 text-2xl\" style=\"color: #' + theme.footerColor + ';\">- ' + data.author + '</cite></div>';",
+        "      break;",
+        "    case 'PROCESS':",
+        "      const steps = data.steps.map((step, i) => '<div class=\"flex-1 bg-gray-900/40 p-4 rounded-lg text-center\"><p class=\"font-bold text-xl\" style=\"color: #' + theme.titleColor + ';\">' + step.title + '</p><p class=\"text-base mt-2\">' + step.description + '</p></div>' + (i < data.steps.length - 1 ? '<div class=\"self-center text-4xl font-bold mx-2\" style=\"color: #' + theme.titleColor + ';\">→</div>' : '')).join('');",
+        "      slideContent = '<h3 class=\"text-4xl font-bold mb-8 text-center\" style=\"color: #' + theme.titleColor + ';\">' + title + '</h3><div class=\"flex items-stretch justify-center space-x-2\">' + steps + '</div>';",
+        "      break;",
+        "    case 'CHART_BAR':",
+        "      const maxValue = Math.max(...data.data.map(d => d.value), 1);",
+        "      const bars = data.data.map(item => '<div class=\"flex flex-col items-center flex-1 h-full justify-end\"><span class=\"text-sm font-bold\" style=\"color: #' + theme.textColor + ';\">' + item.value + '</span><div class=\"w-3/4 rounded-t-md mt-1\" style=\"height: ' + ((item.value / maxValue) * 80) + '%; background-color: #' + theme.titleColor + ';\"></div><p class=\"text-sm mt-2 truncate\" style=\"color: #' + theme.footerColor + ';\">' + item.label + '</p></div>').join('');",
+        "      slideContent = '<h3 class=\"text-4xl font-bold mb-4 text-center\" style=\"color: #' + theme.titleColor + ';\">' + title + '</h3><div class=\"flex-grow flex justify-around items-end h-4/5 space-x-2\">' + bars + '</div>';",
+        "      break;",
+        "    case 'TIMELINE':",
+        "      const events = data.events.map((event, i) => '<div class=\"relative pl-8\"><div class=\"absolute -left-2 top-1 w-4 h-4 rounded-full border-4\" style=\"background-color: #' + theme.bg + '; border-color: #' + theme.titleColor + ';\"></div><p class=\"font-bold text-xl\" style=\"color: #' + theme.titleColor + ';\">' + event.year + '</p><p class=\"text-base\">' + event.text + '</p></div>').join('<div class=\"h-8 w-px ml-[7px]\" style=\"background-color: #' + theme.titleColor + ';\"></div>');",
+        "      slideContent = '<h3 class=\"text-4xl font-bold mb-8\" style=\"color: #' + theme.titleColor + ';\">' + title + '</h3><div class=\"relative\">' + events + '</div>';",
+        "      break;",
+        "    case 'TEAM_GRID':",
+        "      const members = data.members.map(m => '<div class=\"bg-gray-900/40 p-4 rounded-lg text-center\"><p class=\"font-bold text-xl\">' + m.name + '</p><p class=\"text-base\" style=\"color: #' + theme.footerColor + ';\">' + m.title + '</p></div>').join('');",
+        "      slideContent = '<h3 class=\"text-4xl font-bold mb-8 text-center\" style=\"color: #' + theme.titleColor + ';\">' + title + '</h3><div class=\"grid grid-cols-2 md:grid-cols-4 gap-4\">' + members + '</div>';",
+        "      break;",
+        "    case 'INFOGRAPHIC_ICONS':",
+        "      const icons = data.items.map(item => '<div class=\"flex flex-col items-center text-center\"><div class=\"w-20 h-20 flex items-center justify-center\">' + getIcon(item.icon) + '</div><p class=\"text-base mt-2\">' + item.text + '</p></div>').join('');",
+        "      slideContent = '<h3 class=\"text-4xl font-bold mb-8 text-center\" style=\"color: #' + theme.titleColor + ';\">' + title + '</h3><div class=\"flex justify-around items-start\">' + icons + '</div>';",
+        "      break;",
+        "    default: slideContent = '<div class=\"flex flex-col items-center justify-center h-full\"><h3 class=\"text-4xl font-bold\" style=\"color: #' + theme.titleColor + ';\">' + title + '</h3><p class=\"mt-4\">' + slide.layout + ' layout not fully implemented in deployer.</p></div>'; break;",
+        "  }",
+        "  const finalSlideContent = '<div class=\"' + contentContainerClasses + '\">' + slideContent + '</div>';",
+        "  let flexDir = isVerticalLayout ? 'flex-col' : 'flex-row';",
+        "  contentHtml = '<div class=\"h-full w-full flex ' + flexDir + ' gap-6\">' + (hasImage && (imagePosition === 'left' || imagePosition === 'top') ? imageElement : '') + finalSlideContent + (hasImage && (imagePosition === 'right' || imagePosition === 'bottom') ? imageElement : '') + '</div>';",
+        "  slideContentEl.innerHTML = contentHtml;",
+        "  counterEl.textContent = '' + (index + 1) + ' / ' + slides.length;",
+        "}",
+
+        "function navigate(direction) {",
+        "  slideContentEl.classList.add('fade-out');",
+        "  setTimeout(() => {",
+        "    currentSlideIndex += direction;",
+        "    if (currentSlideIndex < 0) currentSlideIndex = slides.length - 1;",
+        "    else if (currentSlideIndex >= slides.length) currentSlideIndex = 0;",
+        "    renderSlide(currentSlideIndex);",
+        "    slideContentEl.classList.remove('fade-out');",
+        "  }, 400);",
+        "}",
+        "prevButton.addEventListener('click', () => navigate(-1));",
+        "nextButton.addEventListener('click', () => navigate(1));",
+        "document.addEventListener('keydown', (e) => {",
+        "  if (e.key === 'ArrowLeft') navigate(-1);",
+        "  if (e.key === 'ArrowRight') navigate(1);",
+        "});",
+        "renderSlide(currentSlideIndex);"
+    ].join('');
+
+    // Build the final HTML using a string array and join() to avoid template literal parsing issues.
+    const htmlParts = [
+        '<!DOCTYPE html>',
+        '<html lang="zh-TW">',
+        '<head>',
+        '<meta charset="UTF-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+        '<title>AI 生成簡報</title>',
+        '<script src="https://cdn.tailwindcss.com"><\/script>',
+        '<style>',
+            `body { background-color: #${selectedTheme.bg}; color: #${selectedTheme.textColor}; font-family: '${selectedTheme.fontFace}', sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; margin: 0; }`,
+            '#presentation-wrapper { width: 100%; max-width: 1100px; }',
+            `#presentation-container { width: 100%; aspect-ratio: 16 / 9; position: relative; box-shadow: 0 10px 25px rgba(0,0,0,0.2); border-radius: 0.5rem; overflow: hidden; background-color: #${selectedTheme.bg}; }`,
+            '#slide-content { width: 100%; height: 100%; transition: opacity 0.4s ease-in-out; }',
+            '.nav-button { position: absolute; top: 50%; transform: translateY(-50%); background-color: rgba(0,0,0,0.3); color: white; border: none; border-radius: 50%; width: 44px; height: 44px; font-size: 24px; cursor: pointer; z-index: 10; display: flex; align-items: center; justify-content: center; transition: background-color 0.2s; }',
+            '.nav-button:hover { background-color: rgba(0,0,0,0.6); }',
+            '#prev-button { left: 1rem; }',
+            '#next-button { right: 1rem; }',
+            '#slide-counter { position: absolute; bottom: 1rem; right: 1.5rem; background-color: rgba(0,0,0,0.5); color: white; padding: 0.25rem 0.75rem; border-radius: 1rem; font-size: 0.875rem; z-index: 10; }',
+            '.fade-out { opacity: 0; }',
+        '</style>',
+        '</head>',
+        '<body>',
+        '<div id="presentation-wrapper">',
+            `<h1 style="color: #${selectedTheme.titleColor}; margin-bottom: 1rem; font-size: 1.75rem; font-weight: bold; text-align: center;">AI 生成簡報</h1>`,
+            '<div id="presentation-container">',
+                '<div id="slide-content"></div>',
+                '<button id="prev-button" class="nav-button" aria-label="上一張">&lt;</button>',
+                '<button id="next-button" class="nav-button" aria-label="下一張">&gt;</button>',
+                '<div id="slide-counter"></div>',
+            '</div>',
+             `<footer style="margin-top: 1rem; font-size: 0.875rem; color: #${selectedTheme.footerColor}; text-align: center;">由 AI 語音簡報生成器驅動</footer>`,
+        '</div>',
+        
+        '<script id="slides-data" type="application/json">',
+        slidesJson,
+        '<\/script>',
+        '<script id="theme-data" type="application/json">',
+        themeJson,
+        '<\/script>',
+        '<script id="icons-data" type="application/json">',
+        iconSvgsJson,
+        '<\/script>',
+
+        '<script>',
+        viewerScript,
+        '<\/script>',
+        '<script type="module" src="/index.tsx"></script>
+</body>',
+        '</html>',
+    ];
+    return htmlParts.join('');
+};
+// --- End of deploymentService.ts ---
+
+// ===================================
+// INLINED: Components
+// ===================================
+
+const Loader = ({ text, progress }) => {
+  return (
+    <div className="flex flex-col items-center justify-center text-center p-8 w-full max-w-md">
+      <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-primary"></div>
+      <p className="mt-4 text-lg text-text-main">{text}</p>
+      {progress && progress.total > 0 && (
+          <div className="w-full mt-4">
+              <p className="text-sm text-text-secondary mb-2">
+                  進度: {progress.current} / {progress.total}
+              </p>
+              <div className="w-full bg-surface rounded-full h-2.5 border border-border-color">
+                  <div className="bg-primary h-2.5 rounded-full" style={{ width: `${(progress.current / progress.total) * 100}%`, transition: 'width 0.5s ease-in-out' }}></div>
+              </div>
+          </div>
+      )}
+    </div>
+  );
+};
+
+const Header = () => {
+  return (
+    <header className="py-4 px-6 border-b border-border-color bg-surface">
+      <div className="container mx-auto flex items-center gap-3">
+        <PresentationIcon className="w-8 h-8 text-primary" />
+        <h1 className="text-2xl font-bold text-text-main">AI 語音簡報生成器</h1>
+      </div>
+    </header>
+  );
+};
+
+const Recorder = ({ isRecording, onStart, onStop }) => {
+  const [elapsedTime, setElapsedTime] = useState(0);
+  useEffect(() => {
+    let interval = null;
+    if (isRecording) {
+      interval = window.setInterval(() => {
+        setElapsedTime(prevTime => prevTime + 1);
+      }, 1000);
+    } else {
+      setElapsedTime(0);
+    }
+    return () => {
+      if (interval) window.clearInterval(interval);
+    };
+  }, [isRecording]);
+  const formatTime = (time) => {
+    const minutes = Math.floor(time / 60).toString().padStart(2, '0');
+    const seconds = (time % 60).toString().padStart(2, '0');
+    return `${minutes}:${seconds}`;
+  };
+  const buttonClasses = "w-24 h-24 rounded-full flex items-center justify-center transition-all duration-300 ease-in-out shadow-lg focus:outline-none focus:ring-4";
+  return (
+    <div className="flex flex-col items-center justify-center space-y-6 p-8 bg-surface rounded-xl border border-border-color">
+      <div className="relative">
+        {isRecording ? (
+          <button onClick={onStop} className={`${buttonClasses} bg-red-600 hover:bg-red-700 focus:ring-red-400 text-white`}>
+            <StopIcon className="w-10 h-10" />
+            <div className="absolute inset-0 rounded-full border-4 border-red-500 animate-pulse-slow"></div>
+          </button>
+        ) : (
+          <button onClick={onStart} className={`${buttonClasses} bg-primary hover:bg-primary-hover focus:ring-indigo-400 text-white`}>
+            <MicIcon className="w-10 h-10" />
+          </button>
+        )}
+      </div>
+      <div className="text-center">
+        <p className="text-lg font-semibold text-text-main">
+          {isRecording ? `錄音中... (${formatTime(elapsedTime)})` : "按下按鈕開始錄音"}
+        </p>
+        <p className="text-sm text-text-secondary">完成後點擊停止。</p>
+      </div>
+    </div>
+  );
+};
+
+const SlideCard = ({ slide, index }) => {
+  const renderSlideContent = (slide) => {
+    switch (slide.layout) {
+      case LayoutType.PROCESS:
+        return (
+          <div className="space-y-2">
+            <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+            <div className="flex items-center space-x-2 overflow-x-auto p-2">
+              {slide.data.steps.map((step, i) => (
+                <React.Fragment key={i}>
+                  <div className="flex-shrink-0 bg-gray-800 p-2 rounded-md w-28 text-center">
+                    <p className="font-bold text-sm text-indigo-300">{step.title}</p>
+                    <p className="text-xs text-text-secondary truncate">{step.description}</p>
+                  </div>
+                  {i < slide.data.steps.length - 1 && <div className="text-primary font-bold text-lg">→</div>}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        );
+      case LayoutType.CHART_BAR:
+        const maxValue = Math.max(...slide.data.data.map(d => d.value), 1);
+        return (
+          <div className="space-y-2">
+              <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+              <div className="flex justify-around items-end h-32 p-2 bg-gray-900 rounded-md space-x-2">
+                  {slide.data.data.map((item, i) => (
+                      <div key={i} className="flex flex-col items-center flex-1 h-full justify-end">
+                          <div className="w-full bg-primary rounded-t-sm" style={{ height: `${(item.value / maxValue) * 100}%` }}></div>
+                          <p className="text-xs text-text-secondary mt-1 truncate">{item.label}</p>
+                      </div>
+                  ))}
+              </div>
+          </div>
+        );
+      case LayoutType.TIMELINE:
+          return (
+              <div className="space-y-2">
+                  <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+                  <div className="relative border-l-2 border-primary ml-2 pl-6 py-2 space-y-4">
+                      {slide.data.events.map((event, i) => (
+                          <div key={i} className="relative">
+                              <div className="absolute -left-[30px] top-1 w-3 h-3 bg-primary rounded-full border-2 border-surface"></div>
+                              <p className="font-bold text-indigo-300">{event.year}</p>
+                              <p className="text-sm text-text-secondary">{event.text}</p>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          );
+      case LayoutType.QUOTE:
+          return (
+              <div className="flex flex-col h-full justify-center">
+                  <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+                  <div className="relative">
+                      <QuoteIcon className="absolute -top-4 -left-2 w-16 h-16 text-gray-700 opacity-20" />
+                      <blockquote className="relative p-4 border-l-4 border-secondary">
+                          <p className="text-lg italic text-text-main">"{slide.data.quote}"</p>
+                      </blockquote>
+                  </div>
+                  <cite className="mt-2 text-right text-text-secondary">- {slide.data.author}</cite>
+              </div>
+          );
+      case LayoutType.TITLE_WITH_SUBTITLE:
+      case LayoutType.THANK_YOU:
+          return (
+              <div className="flex flex-col h-full justify-center items-center text-center">
+                  <h3 className="text-3xl font-bold text-primary">{slide.data.title}</h3>
+                  <p className="text-lg text-text-secondary mt-2">{slide.data.subtitle}</p>
+              </div>
+          );
+      case LayoutType.AGENDA:
+      case LayoutType.LIST_STYLE:
+          return (
+              <>
+                <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+                <ol className="list-decimal list-inside space-y-2 text-text-main">
+                  {(slide.data.items || []).map((point, i) => (
+                    <li key={i} className="text-base">{point}</li>
+                  ))}
+                </ol>
+              </>
+          );
+      case LayoutType.TEAM_GRID:
+          return (
+              <div>
+                  <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                      {slide.data.members.map((member, i) => (
+                          <div key={i} className="bg-gray-800 p-2 rounded text-center">
+                              <p className="font-semibold text-text-main text-sm">{member.name}</p>
+                              <p className="text-xs text-text-secondary">{member.title}</p>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          );
+      case LayoutType.INFOGRAPHIC_PERCENTAGE:
+          return (
+               <div>
+                  <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+                  <div className="space-y-3">
+                      {slide.data.items.map((item, i) => (
+                          <div key={i}>
+                              <div className="flex justify-between text-sm mb-1">
+                                  <span className="text-text-secondary">{item.label}</span>
+                                  <span className="font-bold text-primary">{item.value}%</span>
+                              </div>
+                              <div className="w-full bg-gray-700 rounded-full h-2">
+                                  <div className="bg-primary h-2 rounded-full" style={{ width: `${item.value}%` }}></div>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          );
+      case LayoutType.QUAD_GRID:
+          return (
+               <div>
+                  <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                      {slide.data.items.map((item, i) => (
+                          <div key={i} className="bg-gray-800 p-2 rounded flex flex-col items-center text-center">
+                               {item.icon && <DynamicIcon name={item.icon} className="w-6 h-6 text-indigo-300 mb-1" />}
+                               <p className="font-semibold text-indigo-300 text-sm">{item.title}</p>
+                               <p className="text-xs text-text-secondary">{item.description}</p>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          );
+      case LayoutType.COLUMNS_STYLE:
+          const numCols = slide.data.columns.length;
+          const gridClass = numCols === 3 ? 'grid-cols-3' : numCols === 4 ? 'grid-cols-4' : 'grid-cols-2';
+          return (
+               <div>
+                  <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+                  <div className={`grid ${gridClass} gap-4`}>
+                      {slide.data.columns.map((col, i) => (
+                          <div key={i}>
+                               <div className="flex items-center gap-2 mb-1">
+                                  {col.icon && <DynamicIcon name={col.icon} className="w-5 h-5 text-indigo-300 flex-shrink-0" />}
+                                  <p className="font-semibold text-indigo-300 text-sm truncate">{col.title}</p>
+                               </div>
+                                <ul className="list-disc list-inside space-y-1 text-xs text-text-secondary">
+                                  {col.content.map((pt, j) => <li key={j}>{pt}</li>)}
+                                </ul>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          );
+      case LayoutType.INFOGRAPHIC_ICONS:
+      case LayoutType.INFOGRAPHIC_CIRCLES:
+          const circleMode = slide.layout === LayoutType.INFOGRAPHIC_CIRCLES;
+          return (
+              <div>
+                  <h3 className="text-xl font-bold text-primary mb-3">{slide.data.title}</h3>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                      {(slide.data.items).map((item, i) => (
+                          <div key={i} className="flex flex-col items-center">
+                             <div className={`w-10 h-10 bg-primary/20 flex items-center justify-center mb-1 ${circleMode ? 'rounded-full' : 'rounded-md'}`}>
+                                  <DynamicIcon name={item.icon || 'check-circle'} className="w-6 h-6 text-primary" />
+                             </div>
+                             <p className="text-xs text-text-secondary">{item.text}</p>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          );
+      case LayoutType.TITLE_WITH_IMAGE:
+           return <h3 className="text-2xl font-bold text-primary m-auto text-center">{slide.data.title}</h3>;
+      case LayoutType.TEXT_WITH_IMAGE:
+      case LayoutType.STANDARD:
+      default: {
+        const data = slide.data;
+        const title = 'title' in data && typeof data.title === 'string' ? data.title : '';
+        const content = 'content' in data && Array.isArray(data.content) ? data.content : [];
+        return (
+          <>
+            <h3 className="text-xl font-bold text-primary mb-3">{title}</h3>
+            <ul className="list-disc list-inside space-y-1 text-text-main">
+              {(content || []).map((point, i) => (
+                <li key={i} className="text-base">{point}</li>
+              ))}
+            </ul>
+          </>
+        );
+      }
+    }
+  };
+  const hasImage = !!(slide.imageUrl && slide.imageUrl.length > 0);
+  const hasImagePrompt = !!(slide.data.imagePrompt && slide.data.imagePrompt.length > 0);
+  const showImageArea = hasImage || hasImagePrompt;
+  const imagePosition = slide.data.imagePosition || 'right';
+  const isVerticalLayout = imagePosition === 'top' || imagePosition === 'bottom';
+  const containerClasses = `p-4 flex-grow flex gap-4 ${isVerticalLayout ? 'flex-col' : 'flex-row'}`;
+  const imageContainerClasses = `flex items-center justify-center bg-gray-900 rounded-md overflow-hidden ${isVerticalLayout ? 'w-full h-1/2' : 'h-full w-1/2'}`;
+  const contentContainerClasses = `flex flex-col justify-center ${showImageArea ? (isVerticalLayout ? 'h-1/2' : 'w-1/2') : 'w-full'}`;
+  const imageElement = (
+    <div className={imageContainerClasses}>
+      {hasImage ? 
+        <img src={`data:image/png;base64,${slide.imageUrl}`} alt={`AI generated for "${('title' in slide.data && slide.data.title) || 'slide'}"`} className="object-cover w-full h-full transition-transform duration-300 ease-in-out" style={{ transform: `scale(${slide.data.imageScale ? slide.data.imageScale / 100 : 1})` }}/> :
+        <div className="text-sm text-text-secondary p-4 text-center">圖片生成後將顯示於此</div>
+      }
+    </div>
+  );
+  const contentElement = (<div className={contentContainerClasses}>{renderSlideContent(slide)}</div>);
+  
+  return (
+    <div className="bg-surface border border-border-color rounded-lg shadow-lg overflow-hidden h-full flex flex-col aspect-[16/9]">
+      <div className={containerClasses}>
+        {showImageArea && (imagePosition === 'left' || imagePosition === 'top') && imageElement}
+        {contentElement}
+        {showImageArea && (imagePosition === 'right' || imagePosition === 'bottom') && imageElement}
+      </div>
+      <div className="bg-gray-800 bg-opacity-50 py-2 px-4 text-right mt-auto">
+        <span className="text-sm text-text-secondary">投影片 {index + 1}</span>
+      </div>
+    </div>
+  );
+};
+
+// --- Inlined PresentationViewer ---
+const PresentationViewer = ({ slides, theme }) => {
+  const [isDownloading, setIsDownloading] = useState(false);
+  const selectedTheme = deploymentThemes[theme] || deploymentThemes.dark;
+  const handleDownload = async () => {
+    if (isDownloading || slides.length === 0) return;
+    setIsDownloading(true);
+    try {
+      const pptx = new PptxGenJS();
+      pptx.layout = 'LAYOUT_16x9';
+      pptx.defineSlideMaster({
+        title: 'MASTER_SLIDE',
+        background: { color: selectedTheme.bg },
+        objects: [{ text: { text: '由 AI 語音簡報生成器驅動', options: { x: 0, y: '95%', w: '100%', align: 'center', color: selectedTheme.footerColor, fontSize: 10, fontFace: selectedTheme.fontFace } } }],
+      });
+      const svgToB64 = (svg, color) => {
+        const coloredSvg = svg.replace(/currentColor/g, `#${color}`);
+        return `data:image/svg+xml;base64,${btoa(coloredSvg)}`;
+      };
+      for (const slideData of slides) {
+        const slide = pptx.addSlide({ masterName: 'MASTER_SLIDE' });
+        const hasImage = slideData.imageUrl && slideData.imageUrl.length > 0;
+        const imagePosition = slideData.data.imagePosition || 'right';
+        let imageBox = null;
+        let contentBox = { x: 0.5, y: 0.5, w: 9, h: 4.8 };
+        if (hasImage) {
+            switch(imagePosition) {
+                case 'left': imageBox = { x: 0.25, y: 0.5, w: 4.5, h: 4.625 }; contentBox = { x: 5, y: 0.5, w: 4.75, h: 4.625 }; break;
+                case 'top': imageBox = { x: 0.5, y: 0.25, w: 9, h: 2.5 }; contentBox = { x: 0.5, y: 2.85, w: 9, h: 2.5 }; break;
+                case 'bottom': imageBox = { x: 0.5, y: 3, w: 9, h: 2.5 }; contentBox = { x: 0.5, y: 0.25, w: 9, h: 2.65 }; break;
+                case 'right': default: imageBox = { x: 5.25, y: 0.5, w: 4.5, h: 4.625 }; contentBox = { x: 0.25, y: 0.5, w: 4.75, h: 4.625 }; break;
+            }
+        }
+        if (imageBox && slideData.imageUrl) {
+            slide.addImage({ data: `data:image/png;base64,${slideData.imageUrl}`, ...imageBox });
+        }
+        const titleY = contentBox.y;
+        const titleH = 0.8;
+        const bodyY = titleY + titleH;
+        let bodyH = contentBox.h - titleH;
+        const slideTitle = 'title' in slideData.data ? slideData.data.title : '';
+        const titleOptions = { ...contentBox, y: titleY, h: titleH, fontSize: 32, bold: true, color: selectedTheme.titleColor, fontFace: selectedTheme.fontFace, valign: 'top' };
+        if (![LayoutType.TITLE_WITH_SUBTITLE, LayoutType.THANK_YOU, LayoutType.QUOTE, LayoutType.TITLE_WITH_IMAGE].includes(slideData.layout) && slideTitle) {
+            slide.addText(slideTitle, titleOptions);
+        } else {
+           bodyH = contentBox.h;
+        }
+        switch (slideData.layout) {
+          case LayoutType.AGENDA:
+          case LayoutType.LIST_STYLE:
+             if ('items' in slideData.data) {
+                slide.addText(slideData.data.items.map(point => ({ text: String(point ?? '') })), { ...contentBox, y: bodyY, h: bodyH, fontSize: 18, color: selectedTheme.textColor, bullet: { type: 'bullet' }, lineSpacing: 36, fontFace: selectedTheme.fontFace, breakLine: true });
+             }
+             break;
+          case LayoutType.TEXT_WITH_IMAGE:
+          case LayoutType.STANDARD:
+          default:
+            const content = 'content' in slideData.data ? slideData.data.content : ('items' in slideData.data ? slideData.data.items : []);
+            if (content && content.length > 0) {
+              slide.addText(content.map(point => ({ text: String(point ?? '') })), { ...contentBox, y: bodyY, h: bodyH, fontSize: 18, color: selectedTheme.textColor, bullet: { type: 'bullet' }, lineSpacing: 36, fontFace: selectedTheme.fontFace, breakLine: true });
+            }
+            break;
+        }
+        if (slideData.data.notes) slide.addNotes(slideData.data.notes);
+      }
+      await pptx.writeFile({ fileName: `AI生成簡報-${theme}.pptx` });
+    } catch (error) {
+      console.error("生成簡報檔案時出錯:", error);
+      alert("抱歉，生成簡報時發生錯誤。請查看主控台以獲取更多資訊。");
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+  const buttonClasses = "flex items-center gap-2 px-4 py-2 bg-secondary text-white font-semibold rounded-lg hover:bg-purple-500 transition-colors duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed";
+  return (
+    <div className="w-full space-y-8">
+      <div className="flex justify-between items-center">
+        <h2 className="text-3xl font-bold text-text-main">生成的簡報</h2>
+        <button onClick={handleDownload} disabled={isDownloading || slides.length === 0} className={buttonClasses} aria-label="下載簡報">
+          <DownloadIcon className="w-5 h-5"/>
+          {isDownloading ? '生成中...' : '下載簡報 (PPTX)'}
+        </button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {slides.map((slide, index) => (
+          <SlideCard key={slide.id} slide={slide} index={index} />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const SlideEditor = ({ slide, updateSlideData, updateSlideLayout, openIconPicker }) => {
+    const commonInputClass = "w-full bg-gray-900 border border-border-color rounded-md px-3 py-2 text-text-main focus:ring-2 focus:ring-primary focus:outline-none text-sm";
+    const commonLabelClass = "text-sm font-medium text-text-secondary mb-1 block";
+    const commonButtonClass = "text-sm mt-2 text-primary hover:text-primary-hover font-semibold";
+    
+    const layoutTypeTranslations = {
+        [LayoutType.TITLE_WITH_SUBTITLE]: "標題與副標題",
+        [LayoutType.STANDARD]: "標準文字",
+        [LayoutType.TEXT_WITH_IMAGE]: "文字與圖片",
+        [LayoutType.TITLE_WITH_IMAGE]: "全頁圖片標題",
+        [LayoutType.PROCESS]: "流程圖",
+        [LayoutType.TIMELINE]: "時間軸",
+        [LayoutType.CHART_BAR]: "長條圖",
+        [LayoutType.CHART_COMPARISON]: "比較圖",
+        [LayoutType.INFOGRAPHIC_PERCENTAGE]: "百分比圖",
+        [LayoutType.QUOTE]: "引言",
+        [LayoutType.AGENDA]: "議程/目錄",
+        [LayoutType.LIST_STYLE]: "清單樣式",
+        [LayoutType.TEAM_GRID]: "團隊成員",
+        [LayoutType.COLUMNS_STYLE]: "多欄式重點",
+        [LayoutType.QUAD_GRID]: "四象限網格",
+        [LayoutType.INFOGRAPHIC_ICONS]: "圖示資訊圖",
+        [LayoutType.INFOGRAPHIC_CIRCLES]: "圓形資訊圖",
+        [LayoutType.THANK_YOU]: "感謝頁",
+    };
+
+    const handleDataChange = (key, value) => {
+        updateSlideData(slide.id, { ...slide.data, [key]: value });
+    };
+
+    const handleArrayItemChange = (arrayKey, index, itemKey, value) => {
+        const newArray = [...(slide.data[arrayKey] || [])];
+        const item = newArray[index] || {};
+        newArray[index] = { ...item, [itemKey]: value };
+        updateSlideData(slide.id, { ...slide.data, [arrayKey]: newArray });
+    };
+    
+    const addArrayItem = (arrayKey, newItem) => {
+        const currentArray = slide.data[arrayKey] || [];
+        updateSlideData(slide.id, { ...slide.data, [arrayKey]: [...currentArray, newItem] });
+    };
+    
+    const removeArrayItem = (arrayKey, index) => {
+        const newArray = [...(slide.data[arrayKey] || [])];
+        newArray.splice(index, 1);
+        updateSlideData(slide.id, { ...slide.data, [arrayKey]: newArray });
+    };
+
+    const renderLayoutSpecificEditor = () => {
+        const { data } = slide;
+        const titleEditor = <input type="text" value={data.title || ''} onChange={(e) => handleDataChange('title', e.target.value)} className={commonInputClass} />;
+        const simpleListEditor = (key) => <textarea value={(data[key] || []).join('\n')} onChange={(e) => handleDataChange(key, e.target.value.split('\n'))} className={`${commonInputClass} min-h-[80px]`} rows={(data[key] || []).length + 1} />;
+        const itemEditor = (key, newItem, fieldConfigs) => (
+            <div className="space-y-2">
+                {(data[key] || []).map((item, i) => (
+                    <div key={i} className="flex gap-2 items-start bg-gray-800 p-2 rounded">
+                        <div className="flex-grow space-y-1">
+                            {fieldConfigs.map(field => (
+                                <div key={field.key} className="flex items-center gap-2">
+                                    {field.type === 'icon' ? 
+                                     <button onClick={() => openIconPicker(slide.id, i, field.key)} className="p-1.5 bg-gray-700 rounded-md hover:bg-gray-600"><DynamicIcon name={item.icon} className="w-4 h-4 text-indigo-300"/></button>
+                                     : <input
+                                        type={field.type || 'text'}
+                                        placeholder={field.placeholder}
+                                        value={item[field.key] || (field.type === 'number' ? 0 : '')}
+                                        onChange={(e) => handleArrayItemChange(key, i, field.key, field.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value)}
+                                        className={`${commonInputClass} text-sm`}
+                                    />}
+                                     <span className="text-xs text-text-secondary w-16">{field.placeholder}</span>
+                                </div>
+                            ))}
+                        </div>
+                        <button onClick={() => removeArrayItem(key, i)} className="p-1 text-red-500 hover:text-red-400 flex-shrink-0"><TrashIcon className="w-4 h-4" /></button>
+                    </div>
+                ))}
+                <button onClick={() => addArrayItem(key, newItem)} className={commonButtonClass}>+ 新增項目</button>
+            </div>
+        );
+
+        switch(slide.layout) {
+            case LayoutType.STANDARD: case LayoutType.TEXT_WITH_IMAGE:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>內容 (每行一個要點)</label>{simpleListEditor('content')}</div>;
+            case LayoutType.AGENDA: case LayoutType.LIST_STYLE:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>項目 (每行一個)</label>{simpleListEditor('items')}</div>;
+            case LayoutType.TITLE_WITH_SUBTITLE: case LayoutType.THANK_YOU:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>副標題</label><input type="text" value={data.subtitle || ''} onChange={(e) => handleDataChange('subtitle', e.target.value)} className={commonInputClass} /></div>;
+            case LayoutType.TITLE_WITH_IMAGE:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}</div>;
+            case LayoutType.QUOTE:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>引言</label><textarea value={data.quote || ''} onChange={(e) => handleDataChange('quote', e.target.value)} className={`${commonInputClass} min-h-[60px]`} /><label className={`${commonLabelClass} mt-2`}>作者</label><input type="text" value={data.author || ''} onChange={(e) => handleDataChange('author', e.target.value)} className={commonInputClass} /></div>;
+            case LayoutType.PROCESS:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>步驟</label>{itemEditor('steps', {title: '新步驟', description: '描述'}, [{key: 'title', placeholder: '標題'}, {key: 'description', placeholder: '描述'}])}</div>;
+            case LayoutType.TIMELINE:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>事件</label>{itemEditor('events', {year: '2025', text: '新事件'}, [{key: 'year', placeholder: '年份/日期'}, {key: 'text', placeholder: '事件描述'}])}</div>;
+            case LayoutType.CHART_BAR:
+            case LayoutType.INFOGRAPHIC_PERCENTAGE:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>數據</label>{itemEditor(slide.layout === 'CHART_BAR' ? 'data' : 'items', {label: '項目D', value: 50}, [{key: 'label', placeholder: '標籤'}, {key: 'value', placeholder: '數值', type: 'number'}])}</div>;
+            case LayoutType.CHART_COMPARISON:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>系列標籤</label><div className="flex gap-2"><input type="text" value={(data.seriesLabels || [])[0] || ''} onChange={e => handleArrayItemChange('seriesLabels', 0, null, e.target.value, true)} className={commonInputClass} /><input type="text" value={(data.seriesLabels || [])[1] || ''} onChange={e => handleArrayItemChange('seriesLabels', 1, null, e.target.value, true)} className={commonInputClass}/></div><label className={`${commonLabelClass} mt-2`}>數據</label>{itemEditor('data', {label: '新類別', value1: 60, value2: 80}, [{key: 'label', placeholder: '標籤'}, {key: 'value1', placeholder: '數值1', type: 'number'}, {key: 'value2', placeholder: '數值2', type: 'number'}])}</div>;
+            case LayoutType.TEAM_GRID:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>成員</label>{itemEditor('members', {name: '新成員', title: '職位'}, [{key: 'name', placeholder: '姓名'}, {key: 'title', placeholder: '職位'}])}</div>;
+            case LayoutType.INFOGRAPHIC_ICONS:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>項目</label>{itemEditor('items', {text: '新項目', icon: 'lightbulb'}, [{key: 'icon', type: 'icon'}, {key: 'text', placeholder: '文字'}])}</div>;
+             case LayoutType.INFOGRAPHIC_CIRCLES:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>項目</label>{itemEditor('items', {text: '新項目'}, [{key: 'text', placeholder: '文字'}])}</div>;
+            case LayoutType.QUAD_GRID:
+                return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>四象限項目 (4個)</label>{itemEditor('items', {title: '新項目', description: '描述', icon: 'presentation'}, [{key: 'icon', type: 'icon'}, {key: 'title', placeholder: '標題'}, {key: 'description', placeholder: '描述'}])}</div>;
+            case LayoutType.COLUMNS_STYLE:
+                 return <div><label className={commonLabelClass}>標題</label>{titleEditor}<label className={`${commonLabelClass} mt-2`}>欄位</label>{itemEditor('columns', {title: '新欄位', content: ['新內容'], icon: 'lightbulb'}, [{key: 'icon', type: 'icon'}, {key: 'title', placeholder: '欄位標題'}, {key: 'content', placeholder: '內容 (換行分隔)', type: 'textarea'}])}</div>;
+            default:
+                return <p className="text-sm text-text-secondary p-4 text-center">此版面沒有可用的編輯器。</p>;
+        }
+    }
+    
+    const hasImage = slide.data.imagePrompt || slide.imageUrl;
+
+    return (
+        <div className="space-y-4">
+            <div>
+                <label className={commonLabelClass}>版面類型</label>
+                <select value={slide.layout} onChange={(e) => updateSlideLayout(slide.id, e.target.value)} className={commonInputClass}>
+                    {Object.values(LayoutType).map((value) => (
+                        <option key={value} value={value}>{layoutTypeTranslations[value] || value}</option>
+                    ))}
+                </select>
+            </div>
+            
+            {renderLayoutSpecificEditor()}
+            
+            <hr className="border-border-color my-2"/>
+            
+            <div>
+                <label className={commonLabelClass}>講者備註</label>
+                <textarea value={slide.data.notes || ''} onChange={(e) => handleDataChange('notes', e.target.value)} className={`${commonInputClass} min-h-[60px]`} placeholder="在此輸入講者備註..."/>
+            </div>
+             <div>
+                <label className={commonLabelClass}>圖片提示詞 (英文)</label>
+                <input type="text" value={slide.data.imagePrompt || ''} onChange={(e) => handleDataChange('imagePrompt', e.target.value)} className={commonInputClass} placeholder="e.g., A minimalist cityscape at dawn"/>
+            </div>
+            {hasImage && (
+                <>
+                    <div>
+                        <label className={commonLabelClass}>圖片位置</label>
+                        <select value={slide.data.imagePosition || 'right'} onChange={(e) => handleDataChange('imagePosition', e.target.value)} className={commonInputClass}>
+                            <option value="right">右側</option>
+                            <option value="left">左側</option>
+                            <option value="top">上方</option>
+                            <option value="bottom">下方</option>
+                        </select>
+                    </div>
+                     <div>
+                        <label className={commonLabelClass}>圖片縮放 ({slide.data.imageScale || 100}%)</label>
+                        <input
+                            type="range"
+                            min="50"
+                            max="200"
+                            step="5"
+                            value={slide.data.imageScale || 100}
+                            onChange={(e) => handleDataChange('imageScale', parseInt(e.target.value, 10))}
+                            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary"
+                        />
+                    </div>
+                </>
+             )}
+        </div>
+    );
+};
+(SlideEditor).displayName = "SlideEditor";
+
+
+// --- Inlined OutlineEditor ---
+const OutlineEditor = ({ initialSlides, onGenerate }) => {
+  const [slides, setSlides] = useState(initialSlides);
+  const [selectedTheme, setSelectedTheme] = useState('dark');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isTuning, setIsTuning] = useState(false);
+  const [iconPickerState, setIconPickerState] = useState(null);
+  const dragItem = useRef(null);
+  const dragOverItem = useRef(null);
+  const updateSlideData = (slideId, data) => {
+    setSlides(currentSlides => currentSlides.map(s => s.id === slideId ? { ...s, data: {...s.data, ...data} } : s));
+  };
+  const handleSort = () => {
+    if (dragItem.current === null || dragOverItem.current === null) return;
+    const newSlides = [...slides];
+    const draggedItemContent = newSlides.splice(dragItem.current, 1)[0];
+    newSlides.splice(dragOverItem.current, 0, draggedItemContent);
+    dragItem.current = null;
+    dragOverItem.current = null;
+    setSlides(newSlides);
+  };
+  const updateSlideLayout = (slideId, newLayout) => {
+    setSlides(currentSlides => currentSlides.map((s) => {
+        if (s.id !== slideId || s.layout === newLayout) {
+            return s;
+        }
+        const oldData = s.data;
+        const baseProps = { notes: oldData.notes, imagePrompt: oldData.imagePrompt, imagePosition: oldData.imagePosition, imageScale: oldData.imageScale || 100 };
+        const oldTitle = 'title' in oldData && typeof oldData.title === 'string' ? oldData.title : '新標題';
+        let oldContent = [];
+        if ('content' in oldData && Array.isArray(oldData.content)) { oldContent = oldData.content.filter((c) => typeof c === 'string'); }
+        else if ('items' in oldData && Array.isArray(oldData.items) && oldData.items.length > 0) {
+            const firstItem = oldData.items[0];
+            if (typeof firstItem === 'string') { oldContent = oldData.items; }
+            else if (typeof firstItem === 'object' && firstItem !== null && 'text' in firstItem && typeof (firstItem).text === 'string') { oldContent = (oldData.items).map(i => i.text); }
+            else if (typeof firstItem === 'object' && firstItem !== null && 'label' in firstItem && typeof (firstItem).label === 'string') { oldContent = (oldData.items).map(i => `${i.label}: ${i.value}%`); }
+            else if (typeof firstItem === 'object' && firstItem !== null && 'title' in firstItem && 'description' in firstItem && typeof (firstItem).title === 'string' && typeof (firstItem).description === 'string') { oldContent = (oldData.items).map(i => `${i.title}: ${i.description}`); }
+        } else if ('quote' in oldData && typeof oldData.quote === 'string' && oldData.quote) { oldContent = [oldData.quote]; }
+        else if ('steps' in oldData && Array.isArray(oldData.steps)) { oldContent = oldData.steps.map(step => `${step.title}: ${step.description}`); }
+        else if ('columns' in oldData && Array.isArray(oldData.columns)) { oldContent = oldData.columns.flatMap(c => c.content); }
+        const oldSubtitle = 'subtitle' in oldData && typeof oldData.subtitle === 'string' ? oldData.subtitle : '簡報副標題';
+        
+        let newSlide;
+        switch (newLayout) {
+            case LayoutType.STANDARD: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, content: oldContent.length > 0 ? oldContent : ['要點一'] } }; break;
+            case LayoutType.TEXT_WITH_IMAGE: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, content: oldContent.length > 0 ? oldContent : ['要點一'] } }; break;
+            case LayoutType.PROCESS: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, steps: [{ title: '步驟一', description: oldContent[0] || '描述一' }] } }; break;
+            case LayoutType.CHART_BAR: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, data: [{ label: oldContent[0] || '項目A', value: 50 }] } }; break;
+            case LayoutType.TIMELINE: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, events: [{ year: '2024', text: oldContent[0] ||'重要事件' }] } }; break;
+            case LayoutType.QUOTE: const quoteText = ('quote' in oldData && typeof oldData.quote === 'string') ? oldData.quote : (oldContent[0] || '這是一句重要的引言'); const authorText = ('author' in oldData && typeof oldData.author === 'string') ? oldData.author : '匿名'; newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, quote: quoteText, author: authorText } }; break;
+            case LayoutType.TITLE_WITH_SUBTITLE: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, subtitle: oldSubtitle } }; break;
+            case LayoutType.AGENDA: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, items: oldContent.length > 0 ? oldContent : ["項目一", "項目二"] } }; break;
+            case LayoutType.LIST_STYLE: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, items: oldContent.length > 0 ? oldContent : ["項目一", "項目二"] } }; break;
+            case LayoutType.TEAM_GRID: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, members: [{ name: "成員一", title: "職位一" }, { name: "成員二", title: "職位二" }] } }; break;
+            case LayoutType.INFOGRAPHIC_ICONS: const items = oldContent.length > 0 ? oldContent.map(text => ({ text, icon: 'lightbulb' })) : [{ text: "項目一", icon: 'lightbulb' }]; newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, items } }; break;
+            case LayoutType.INFOGRAPHIC_CIRCLES: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, items: oldContent.length > 0 ? oldContent.map(text => ({ text })) : [{ text: "項目一" }] } }; break;
+            case LayoutType.TITLE_WITH_IMAGE: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle } }; break;
+            case LayoutType.INFOGRAPHIC_PERCENTAGE: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, items: [{ label: oldContent[0] || '數據A', value: 75 }] } }; break;
+            case LayoutType.QUAD_GRID: const quadItems = Array(4).fill(null).map((_, i) => ({ title: `項目${i+1}`, description: oldContent[i] || "描述", icon: 'presentation' })); newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, items: quadItems } }; break;
+            case LayoutType.COLUMNS_STYLE: const col1Content = oldContent.slice(0, Math.ceil(oldContent.length / 2)); const col2Content = oldContent.slice(Math.ceil(oldContent.length / 2)); const columns = [{ title: "第一欄", content: col1Content.length ? col1Content : ["要點"], icon: 'lightbulb'}, { title: "第二欄", content: col2Content.length ? col2Content : ["要點"], icon: 'cog'}]; newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, columns } }; break;
+            case LayoutType.CHART_COMPARISON: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: oldTitle, seriesLabels: ["系列A", "系列B"], data: [{ label: "類別一", value1: 50, value2: 75 }] } }; break;
+            case LayoutType.THANK_YOU: newSlide = { id: s.id, imageUrl: s.imageUrl, layout: newLayout, data: { ...baseProps, title: "感謝聆聽", subtitle: oldContent[0] || "Q&A" } }; break;
+            default: newSlide = s;
+        }
+        return newSlide;
+    }));
+  };
+  const handleIconSelect = (iconName) => {
+    if (!iconPickerState) return;
+    const { slideId, itemIndex, itemType } = iconPickerState;
+    const slideToUpdate = slides.find(s => s.id === slideId);
+    if (!slideToUpdate) return;
+    let newData = {};
+    if (itemType === 'column' && slideToUpdate.layout === LayoutType.COLUMNS_STYLE) { const newColumns = [...slideToUpdate.data.columns]; newColumns[itemIndex].icon = iconName; newData = { columns: newColumns }; }
+    else if (itemType === 'quad' && slideToUpdate.layout === LayoutType.QUAD_GRID) { const newItems = [...slideToUpdate.data.items]; newItems[itemIndex].icon = iconName; newData = { items: newItems }; }
+    else if (itemType === 'icon' && slideToUpdate.layout === LayoutType.INFOGRAPHIC_ICONS) { const newItems = [...slideToUpdate.data.items]; newItems[itemIndex].icon = iconName; newData = { items: newItems }; }
+    updateSlideData(slideId, newData);
+    setIconPickerState(null);
+  };
+  const handleRefineSlides = useCallback(async (action) => {
+    setIsTuning(true);
+    try {
+        const newSlidesData = await refineSlides(slides, action);
+        const newSlidesWithIds = newSlidesData.map((slide, index) => ({ ...slide, id: `${Date.now()}-${index}`, imageUrl: undefined }));
+        setSlides(newSlidesWithIds);
+    } catch (e) {
+        const message = e instanceof Error ? e.message : '發生未知錯誤。';
+        alert(`智慧調整失敗: ${message}`);
+        console.error(e);
+    } finally { setIsTuning(false); }
+  }, [slides]);
+  const addSlide = () => {
+    const newSlide = { id: `${Date.now()}-new`, layout: LayoutType.STANDARD, data: { title: '新投影片標題', content: ['新的內容要點'], imagePrompt: 'A new concept being born' } };
+    setSlides([...slides, newSlide]);
+  };
+  const removeSlide = (id) => { setSlides(slides.filter(slide => slide.id !== id)); };
+  const handleGenerateClick = () => { setIsGenerating(true); onGenerate(slides, selectedTheme); };
+  const ThemeOption = ({ value, label, selected, onSelect, previewClassName, titleClass, bar1Class, bar2Class }) => (
+    <button onClick={() => onSelect(value)} className={`p-3 rounded-lg border-2 text-center transition-all bg-surface ${selected ? 'border-primary ring-2 ring-primary' : 'border-border-color hover:border-gray-500'}`}>
+        <div className={`w-full h-16 rounded mb-2 flex flex-col items-center justify-center text-xs ${previewClassName}`}>
+            <p className={`font-bold text-lg ${titleClass}`}>標題</p>
+            <div className={`w-3/4 h-1 mt-1 ${bar1Class}`}></div>
+            <div className={`w-3/4 h-1 mt-1 ${bar2Class}`}></div>
+        </div>
+        <span className="font-semibold text-text-main text-sm">{label}</span>
+    </button>
+  );
+  const IconPicker = ({ onSelect, onClose }) => (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+        <div className="bg-surface rounded-lg p-6 w-full max-w-lg border border-border-color" onClick={(e) => e.stopPropagation()}>
+            <h4 className="text-lg font-bold text-text-main mb-4">選擇一個圖示</h4>
+            <div className="grid grid-cols-6 gap-4">
+                {Object.keys(iconMap).map(iconName => (
+                    <button key={iconName} onClick={() => onSelect(iconName)} className="flex flex-col items-center justify-center p-2 rounded-md hover:bg-primary/20 transition-colors">
+                        <DynamicIcon name={iconName} className="w-8 h-8 text-primary" />
+                        <span className="text-xs text-text-secondary mt-1">{iconName}</span>
+                    </button>
+                ))}
+            </div>
+        </div>
+    </div>
+  );
+  
+  return (
+    <div className="w-full max-w-6xl mx-auto space-y-8">
+      {iconPickerState && <IconPicker onSelect={handleIconSelect} onClose={() => setIconPickerState(null)} />}
+      <div>
+        <h2 className="text-3xl font-bold text-text-main">編輯大綱與設計</h2>
+        <p className="text-text-secondary mt-2">在我們生成圖片和最終簡報前，您可以在此調整內容、更換版面並選擇視覺主題。</p>
+      </div>
+      <div className="space-y-4">
+          <h3 className="text-xl font-semibold text-text-main">1. 選擇一個主題</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <ThemeOption value="dark" label="深色專業" selected={selectedTheme === 'dark'} onSelect={setSelectedTheme} previewClassName="bg-slate-700 border border-slate-600" titleClass="text-indigo-300" bar1Class="bg-slate-500" bar2Class="bg-slate-600"/>
+              <ThemeOption value="light" label="明亮創意" selected={selectedTheme === 'light'} onSelect={setSelectedTheme} previewClassName="bg-white border border-slate-300" titleClass="text-blue-500" bar1Class="bg-slate-400" bar2Class="bg-slate-300"/>
+              <ThemeOption value="corporate" label="企業藍調" selected={selectedTheme === 'corporate'} onSelect={setSelectedTheme} previewClassName="bg-slate-50 border-2 border-slate-200" titleClass="text-[#013E85]" bar1Class="bg-[#011738]" bar2Class="bg-[#FFC400]"/>
+              <ThemeOption value="vibrant" label="活力霓虹" selected={selectedTheme === 'vibrant'} onSelect={setSelectedTheme} previewClassName="bg-slate-900 border-2 border-slate-700" titleClass="text-pink-400" bar1Class="bg-slate-600" bar2Class="bg-slate-700"/>
+          </div>
+      </div>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+            <h3 className="text-xl font-semibold text-text-main">2. 調整投影片內容</h3>
+            <span className="bg-primary/20 text-primary text-sm font-bold px-3 py-1 rounded-full">共 {slides.length} 張投影片</span>
+        </div>
+        <div className="space-y-3 p-4 bg-surface rounded-lg border border-border-color">
+            <h4 className="text-lg font-semibold text-text-main">智慧調整</h4>
+            <p className="text-sm text-text-secondary">使用 AI 快速調整您的簡報內容。</p>
+            {isTuning ? (
+                <div className="flex items-center justify-center gap-3 p-4"><div className="w-8 h-8 border-4 border-dashed rounded-full animate-spin border-primary"></div><p className="text-text-secondary">AI 正在調整您的簡報...</p></div>
+            ) : (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
+                    <button onClick={() => handleRefineSlides('detail')} disabled={isTuning} className="flex items-center justify-center gap-2 p-3 bg-gray-800 rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-wait transition-colors"><MagicWandIcon className="w-5 h-5 text-primary" /><span className="text-text-main text-sm font-medium">內容增詳</span></button>
+                    <button onClick={() => handleRefineSlides('simplify')} disabled={isTuning} className="flex items-center justify-center gap-2 p-3 bg-gray-800 rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-wait transition-colors"><MagicWandIcon className="w-5 h-5 text-primary" /><span className="text-text-main text-sm font-medium">內容簡化</span></button>
+                    <button onClick={() => handleRefineSlides('increase')} disabled={isTuning} className="flex items-center justify-center gap-2 p-3 bg-gray-800 rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-wait transition-colors"><AddIcon className="w-5 h-5 text-primary" /><span className="text-text-main text-sm font-medium">增加投影片</span></button>
+                    <button onClick={() => handleRefineSlides('decrease')} disabled={isTuning} className="flex items-center justify-center gap-2 p-3 bg-gray-800 rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-wait transition-colors"><MinusCircleIcon className="w-5 h-5 text-primary" /><span className="text-text-main text-sm font-medium">減少投影片</span></button>
+                </div>
+            )}
+        </div>
+        {slides.map((slide, index) => (
+          <div key={slide.id} draggable onDragStart={() => dragItem.current = index} onDragEnter={() => dragOverItem.current = index} onDragEnd={handleSort} onDragOver={(e) => e.preventDefault()} className="bg-surface p-4 rounded-lg border border-border-color space-y-3 relative transition-shadow duration-300">
+            <div className="absolute -top-3 -left-3 p-1 bg-gray-600 rounded-full text-white cursor-grab active:cursor-grabbing" title="拖曳以排序"><DragHandleIcon className="w-5 h-5"/></div>
+            <button onClick={() => removeSlide(slide.id)} className="absolute -top-3 -right-3 p-1 bg-red-600 rounded-full text-white hover:bg-red-700 transition-colors z-10" aria-label="刪除投影片"><TrashIcon className="w-5 h-5" /></button>
+            <div className="grid md:grid-cols-2 gap-6 items-start">
+                <div className="h-full w-full aspect-[16/9] bg-gray-900 rounded-md overflow-hidden flex items-center justify-center p-2"><SlideCard slide={slide} index={index} /></div>
+                <div className="flex flex-col space-y-4">
+                  <p className="text-sm font-bold text-primary">投影片 {index + 1}</p>
+                  <SlideEditor
+                    slide={slide}
+                    updateSlideData={updateSlideData}
+                    updateSlideLayout={updateSlideLayout}
+                    openIconPicker={(slideId, itemIndex, itemType) => setIconPickerState({slideId, itemIndex, itemType})}
+                  />
+                </div>
+            </div>
+          </div>
+        ))}
+         <button onClick={addSlide} className="w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-border-color rounded-lg text-text-secondary hover:bg-surface hover:border-primary transition-all"><AddIcon className="w-6 h-6" /> 新增投影片</button>
+      </div>
+      <div className="text-center pt-4"><button onClick={handleGenerateClick} disabled={isGenerating || isTuning} className="flex items-center justify-center gap-3 w-full md:w-auto mx-auto px-8 py-4 bg-secondary text-white font-bold text-lg rounded-lg hover:bg-purple-500 transition-all duration-300 disabled:bg-gray-500 disabled:cursor-wait transform hover:scale-105"><MagicWandIcon className="w-6 h-6" />{isGenerating ? '正在生成中...' : '生成圖片與簡報'}</button></div>
+    </div>
+  );
+};
+(OutlineEditor).displayName = "OutlineEditor";
+
+// ===================================
+// INLINED: App.tsx
+// ===================================
+const App = () => {
+  const [appState, setAppState] = useState(AppState.Idle);
+  const [slides, setSlides] = useState([]);
+  const [error, setError] = useState(null);
+  const [presentationTheme, setPresentationTheme] = useState('dark');
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(null);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const audioInputRef = useRef(null);
+  const pdfInputRef = useRef(null);
+  const processFile = useCallback(async (fileBlob) => {
+    setAppState(AppState.ProcessingAudio);
+    setError(null);
+    try {
+      const generatedSlidesData = await generateSlidesFromFile(fileBlob);
+      const slidesWithIds = generatedSlidesData.map((slide, index) => ({ ...slide, id: `${Date.now()}-${index}` }));
+      setSlides(slidesWithIds);
+      setAppState(AppState.EditingOutline);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '從檔案生成大綱時發生未知錯誤。');
+      setAppState(AppState.Error);
+    }
+  }, []);
+  const handleStartRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      mediaRecorderRef.current.ondataavailable = (event) => { audioChunksRef.current.push(event.data); };
+      mediaRecorderRef.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        audioChunksRef.current = [];
+        stream.getTracks().forEach(track => track.stop());
+        await processFile(audioBlob);
+      };
+      mediaRecorderRef.current.start();
+      setAppState(AppState.Recording);
+      setError(null);
+    } catch (err) {
+      console.error("無法開始錄音:", err);
+      setError("無法存取麥克風。請確保已授予權限並重新整理頁面。");
+      setAppState(AppState.Error);
+    }
+  }, [processFile]);
+  const handleStopRecording = useCallback(() => { if (mediaRecorderRef.current?.state === "recording") { mediaRecorderRef.current.stop(); } }, []);
+  const handleAudioFileSelect = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    if (file) { await processFile(file); if(audioInputRef.current) audioInputRef.current.value = ''; }
+  }, [processFile]);
+  const handlePdfFileSelect = useCallback(async (event) => {
+    const file = event.target.files?.[0];
+    if (file) { await processFile(file); if(pdfInputRef.current) pdfInputRef.current.value = ''; }
+  }, [processFile]);
+  const handleGeneratePresentation = useCallback(async (finalSlides, theme) => {
+    setAppState(AppState.GeneratingPresentation);
+    setPresentationTheme(theme);
+    setError(null);
+    const slidesToProcess = [...finalSlides];
+    const slidesThatNeedImage = slidesToProcess.filter(s => s.data.imagePrompt && !s.imageUrl);
+    setGenerationProgress({ current: 0, total: slidesThatNeedImage.length, errors: [] });
+    for (let i = 0; i < slidesToProcess.length; i++) {
+        const slide = slidesToProcess[i];
+        if (slide.data.imagePrompt && !slide.imageUrl) {
+            try {
+                setGenerationProgress(prev => ({ ...prev, current: prev.current + 1 }));
+                const imageB64 = await generateImageForSlide(slide.data.imagePrompt);
+                slidesToProcess[i] = { ...slide, imageUrl: imageB64 };
+                setSlides([...slidesToProcess]);
+                if (slidesThatNeedImage.length > 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                }
+            } catch (e) {
+                console.error(`為投影片 ${i + 1} 生成圖片失敗:`, e);
+                const errorMessage = e instanceof Error ? e.message : '未知錯誤';
+                setGenerationProgress(prev => ({ 
+                    ...prev, 
+                    errors: [...prev.errors, { slideIndex: i + 1, title: slide.data.title || '無標題投影片', error: errorMessage }] 
+                }));
+            }
+        }
+    }
+    setSlides(slidesToProcess);
+    setAppState(AppState.Finished);
+  }, []);
+  const handleDeploy = useCallback(async () => {
+    if (slides.length === 0) { setError("沒有可部署的投影片。"); return; }
+    setIsDeploying(true);
+    try {
+        const htmlContent = generateDeploymentHtml(slides, presentationTheme);
+        const blob = new Blob([htmlContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'presentation.html';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : "未知錯誤";
+        console.error("部署簡報時出錯:", error);
+        setError(`生成部署檔案時發生錯誤: ${message}`);
+    } finally { setIsDeploying(false); }
+  }, [slides, presentationTheme]);
+  const resetState = () => { setAppState(AppState.Idle); setSlides([]); setError(null); setGenerationProgress(null); };
+  const renderContent = () => {
+    switch (appState) {
+      case AppState.Idle:
+        const commonButtonClasses = "w-full md:w-auto flex-1 flex flex-col items-center justify-center gap-4 p-6 bg-surface rounded-xl border border-border-color transition-all duration-300 ease-in-out shadow-lg focus:outline-none focus:ring-4 text-white hover:border-primary hover:-translate-y-1";
+        return (
+            <div className="w-full max-w-5xl mx-auto space-y-10">
+                <div className="text-center"><h2 className="text-4xl font-bold text-text-main">從任何來源到精美簡報</h2><p className="text-text-secondary mt-3 max-w-2xl mx-auto">錄下您的想法、上傳音訊檔、或是提供一份 PDF 文件，讓 AI 為您生成專業簡報，再由您隨心所欲地編輯。</p></div>
+                <div className="flex flex-col md:flex-row gap-8 justify-center items-stretch pt-4">
+                    <button onClick={handleStartRecording} className={`${commonButtonClasses} focus:ring-indigo-400`}><MicIcon className="w-12 h-12 text-primary" /><div className="text-center"><p className="text-lg font-semibold text-text-main">開始錄音</p><p className="text-sm text-text-secondary">直接錄製您的想法</p></div></button>
+                    <div className="relative flex-1"><input id="audio-upload" ref={audioInputRef} type="file" className="hidden" accept="audio/*" onChange={handleAudioFileSelect} /><label htmlFor="audio-upload" className={`${commonButtonClasses} cursor-pointer focus-within:ring-purple-400`}><UploadIcon className="w-12 h-12 text-secondary" /><div className="text-center"><p className="text-lg font-semibold text-text-main">上傳音訊檔</p><p className="text-sm text-text-secondary">選擇一個音訊檔案</p></div></label></div>
+                    <div className="relative flex-1"><input id="pdf-upload" ref={pdfInputRef} type="file" className="hidden" accept="application/pdf" onChange={handlePdfFileSelect} /><label htmlFor="pdf-upload" className={`${commonButtonClasses} cursor-pointer focus-within:ring-accent`}><UploadIcon className="w-12 h-12 text-accent" /><div className="text-center"><p className="text-lg font-semibold text-text-main">上傳 PDF 檔案</p><p className="text-sm text-text-secondary">選擇一個 PDF 文件</p></div></label></div>
+                </div>
+            </div>
+        );
+      case AppState.Recording: return <Recorder isRecording={true} onStart={() => {}} onStop={handleStopRecording} />;
+      case AppState.ProcessingAudio: return <Loader text="正在分析檔案並生成智慧大綱..." />;
+      case AppState.EditingOutline: return <OutlineEditor initialSlides={slides} onGenerate={handleGeneratePresentation} />;
+      case AppState.GeneratingPresentation: return <Loader text="正在施展魔法...為您的投影片生成圖片中..." progress={generationProgress} />;
+      case AppState.Finished:
+        const generationErrors = generationProgress?.errors || [];
+        return (
+            <div className="w-full flex flex-col items-center">
+                 {generationErrors.length > 0 && (
+                    <div className="w-full max-w-4xl mb-6 p-4 bg-yellow-900/30 border border-yellow-500 rounded-lg">
+                        <h3 className="text-lg font-bold text-yellow-300 mb-2">部分圖片生成失敗</h3>
+                        <p className="text-sm text-yellow-200 mb-3">以下投影片的圖片未能成功生成，您可以返回編輯並重試，或直接下載不含這些圖片的簡報。</p>
+                        <ul className="text-xs text-yellow-200 space-y-1 max-h-32 overflow-y-auto">
+                            {generationErrors.map((err, i) => (
+                                <li key={i}><strong>投影片 {err.slideIndex} ({err.title}):</strong> {err.error}</li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+                <PresentationViewer slides={slides} theme={presentationTheme} />
+                <div className="mt-8 flex flex-wrap justify-center gap-4">
+                    <button onClick={() => setAppState(AppState.EditingOutline)} className="flex items-center gap-2 px-6 py-3 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 transition-colors duration-300"><CogIcon className="w-5 h-5" />返回編輯</button>
+                    <button onClick={resetState} className="flex items-center gap-2 px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary-hover transition-colors duration-300"><RetryIcon className="w-5 h-5" />建立新簡報</button>
+                    <button onClick={handleDeploy} disabled={isDeploying} className="flex items-center gap-2 px-6 py-3 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 transition-colors duration-300 disabled:bg-gray-500"><GlobeAltIcon className="w-5 h-5" />{isDeploying ? '部署中...' : '部署至網路 (HTML)'}</button>
+                </div>
+            </div>);
+      case AppState.Error: return (
+          <div className="text-center p-8 bg-red-900/20 border border-red-500 rounded-lg">
+            <h2 className="text-2xl font-bold text-red-400 mb-4">發生錯誤</h2><p className="text-text-main mb-6">{error}</p>
+            <button onClick={resetState} className="flex items-center gap-2 mx-auto px-4 py-2 bg-primary text-white font-semibold rounded-lg hover:bg-primary-hover transition-colors duration-300"><RetryIcon className="w-5 h-5" />再試一次</button>
+          </div>);
+      default: return null;
+    }
+  };
+  return (
+    <div className="min-h-screen bg-background flex flex-col">
+      <Header />
+      <main className="flex-grow container mx-auto p-4 sm:p-6 md:p-8 flex items-center justify-center">{renderContent()}</main>
+      <footer className="text-center py-4 text-text-secondary text-sm border-t border-border-color">由 Gemini & Imagen API 驅動</footer>
+    </div>
+  );
+};
+
+// ===================================
+// Final Render Call
+// ===================================
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
+}
+const root = ReactDOM.createRoot(rootElement);
+root.render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+    </script>
+</body>
+</html>
