@@ -1,15 +1,24 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { SlideData } from '../types';
 
 // The API key MUST be obtained from the environment variable `process.env.API_KEY`.
 // Assume this variable is pre-configured and accessible in the execution context.
-const apiKey = process.env.API_KEY;
 
-// The explicit check for apiKey is removed to prevent the app from crashing on startup.
-// API errors due to a missing key will be caught gracefully by the error handling in App.tsx.
+let ai: GoogleGenAI | null = null;
 
-const ai = new GoogleGenAI({ apiKey });
+/**
+ * Lazily initializes and returns the GoogleGenAI instance.
+ * This prevents the app from crashing on startup if the API key is not yet available.
+ * The constructor will throw an error if the key is missing, which will be caught
+ * by the calling function's error handler in App.tsx.
+ */
+const getAi = (): GoogleGenAI => {
+    if (!ai) {
+        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    }
+    return ai;
+};
+
 
 const presentationSchema = {
     type: Type.OBJECT,
@@ -51,7 +60,7 @@ const presentationSchema = {
 
 const generateContent = async (contents: any, pageCount: number): Promise<{ slides: Omit<SlideData, 'id' | 'imageUrl' | 'imagePosition'>[] }> => {
      try {
-        const response = await ai.models.generateContent({
+        const response = await getAi().models.generateContent({
             model: "gemini-2.5-flash",
             contents,
             config: {
@@ -119,7 +128,7 @@ export const generatePresentationFromAudio = async (audio: { mimeType: string, d
 export const generateImage = async (prompt: string): Promise<string> => {
     if (!prompt || prompt.trim() === '') return '';
     try {
-        const response = await ai.models.generateImages({
+        const response = await getAi().models.generateImages({
             model: 'imagen-3.0-generate-002',
             prompt: `Professional presentation background image, clear and modern, minimalist style: ${prompt}`,
             config: {
