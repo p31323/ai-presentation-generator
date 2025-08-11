@@ -2,11 +2,14 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { SlideData } from '../types';
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable not set.");
-}
+// The API key MUST be obtained from the environment variable `process.env.API_KEY`.
+// Assume this variable is pre-configured and accessible in the execution context.
+const apiKey = process.env.API_KEY;
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// The explicit check for apiKey is removed to prevent the app from crashing on startup.
+// API errors due to a missing key will be caught gracefully by the error handling in App.tsx.
+
+const ai = new GoogleGenAI({ apiKey });
 
 const presentationSchema = {
     type: Type.OBJECT,
@@ -62,7 +65,6 @@ const generateContent = async (contents: any, pageCount: number): Promise<{ slid
     - 'quote': A quote. 'content' has two items: [quote, author].
     - 'comparison': Side-by-side comparison. 'content' has four items: [left_title, left_content, right_title, right_content].
     - 'features': 2-4 key features. 'content' items format: 'icon_name :: Feature Title :: Description'. icon_name is one of 'lightbulb', 'shield', 'rocket', 'cog'.
-    - 'cta': Call to Action. 'content' has two items: [description, button_text].
     - 'process-flow': For sequential steps. 'content' contains multiple strings, each being one step in the flow.
     - 'swot-analysis': For Strengths, Weaknesses, Opportunities, Threats. 'content' must have exactly four items in this order: [strengths_text, weaknesses_text, opportunities_text, threats_text]. Each item can contain newlines.
     - 'circular-diagram': For cyclical processes or items related to a central theme (the slide title). 'content' is an array of strings, each being an item in the circle.
