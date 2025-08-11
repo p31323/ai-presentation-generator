@@ -1,0 +1,6 @@
+{
+  "name": "AI 生成簡報軟體",
+  "description": "Generate presentations by uploading an audio file or a PDF file. The application uses AI to structure your content into slides.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
