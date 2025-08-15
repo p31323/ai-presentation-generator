@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { SlideData } from '../types';
 
@@ -8,13 +9,18 @@ let ai: GoogleGenAI | null = null;
 
 /**
  * Lazily initializes and returns the GoogleGenAI instance.
- * This prevents the app from crashing on startup if the API key is not yet available.
- * The constructor will throw an error if the key is missing, which will be caught
- * by the calling function's error handler in App.tsx.
+ * Throws a specific error if the API_KEY environment variable is not set,
+ * allowing for clearer feedback to the user.
  */
 const getAi = (): GoogleGenAI => {
     if (!ai) {
-        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const apiKey = process.env.API_KEY;
+        // Add a more robust check. The Vite build process might replace an undefined
+        // environment variable with the literal string "undefined".
+        if (!apiKey || apiKey === "undefined") {
+            throw new Error('API_KEY environment variable not set. Please configure it in your deployment environment.');
+        }
+        ai = new GoogleGenAI({ apiKey: apiKey });
     }
     return ai;
 };
