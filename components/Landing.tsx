@@ -11,7 +11,7 @@ const Landing: React.FC<LandingProps> = ({ onStart }) => {
 
     return (
         <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-            <h1 className="text-4xl md:text-5xl font-bold text-sky-400 mb-2">AI Presentation Generator</h1>
+            <h1 className="text-4xl md:text-5xl font-bold text-sky-400 mb-2">AI 簡報生成器</h1>
             <p className="text-lg text-slate-400 mb-8 max-w-3xl">從您的聲音或文件中即時創建精美的簡報。上傳內容後，您將可以編輯文字、調整附圖版面，最後生成您的專屬簡報。(Instantly create beautiful presentations from your voice or documents. After uploading, you can edit text, adjust image layouts, and finalize your custom presentation.)</p>
             
             <div className="mb-8">

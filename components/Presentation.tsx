@@ -552,7 +552,7 @@ const Presentation: React.FC<PresentationProps> = ({ slides, onReset }) => {
                                 contentBounds = { x: 0.5, y: 1.4, w: 9, h: 3.5 };
                                 break;
                         }
-                        pptxSlide.addImage({ data: slide.imageUrl, ...imgOpts });
+                        pptxSlide.addImage({ data: slide.imageUrl, ...imgOpts, sizing: { type: 'cover' } });
                     }
                     
                     if (slide.layout !== 'title' && slide.layout !== 'circular-diagram') {
@@ -562,7 +562,7 @@ const Presentation: React.FC<PresentationProps> = ({ slides, onReset }) => {
                     switch(slide.layout) {
                         case 'title':
                             if (slide.imageUrl) {
-                                pptxSlide.addImage({ data: slide.imageUrl, w: '100%', h: '100%' });
+                                pptxSlide.addImage({ data: slide.imageUrl, w: '100%', h: '100%', sizing: { type: 'cover' } });
                                 pptxSlide.addShape(pres.ShapeType.rect, { x:0, y:0, w:'100%', h:'100%', fill: { type: 'solid', color: '0f172a', alpha: 30 } });
                             }
                             pptxSlide.addText(slide.title, { x: 0, y: 0, w: '100%', h: '100%', align: 'center', valign: 'middle', fontSize: 48, color: 'FFFFFF', bold: true });
@@ -647,7 +647,14 @@ const Presentation: React.FC<PresentationProps> = ({ slides, onReset }) => {
                                 steps.forEach((step, index) => {
                                     pptxSlide.addText(step, { x: startX, y: 2.5, w: dynamicWidth, h: 1, align: 'center', valign: 'middle', shape: pres.ShapeType.rect, fill: { color: '293952' }, color: 'f1f5f9' });
                                     if (index < stepCount - 1) {
-                                        pptxSlide.addShape(pres.ShapeType.arrow, { x: startX + dynamicWidth, y: 3.0, w: 0.8, h: 0, line: { color: '38bdf8', width: 2 } });
+                                        const arrowStartX = startX + dynamicWidth;
+                                        pptxSlide.addLine({
+                                            x1: arrowStartX,
+                                            y1: 3.0,
+                                            x2: arrowStartX + 0.8,
+                                            y2: 3.0,
+                                            line: { color: '38bdf8', width: 2, endArrowType: 'triangle' }
+                                        });
                                     }
                                     startX += dynamicWidth + 0.8;
                                 });

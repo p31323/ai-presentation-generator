@@ -1,6 +1,6 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { SlideData } from '../types';
+import ImageSearchModal from './ImageSearchModal'; // Import the new component
 import { 
     HomeIcon, 
     PresentationChartBarIcon, 
@@ -66,6 +66,7 @@ const positionLabels: Record<NonNullable<SlideData['imagePosition']>, string> = 
 const Editor: React.FC<EditorProps> = ({ slides, onUpdateSlide, onFinalize, onBack }) => {
     const [selectedSlideId, setSelectedSlideId] = useState<string | null>(null);
     const [isLayoutDropdownOpen, setIsLayoutDropdownOpen] = useState(false);
+    const [isImageSearchOpen, setIsImageSearchOpen] = useState(false);
     const dropdownRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -93,6 +94,13 @@ const Editor: React.FC<EditorProps> = ({ slides, onUpdateSlide, onFinalize, onBa
         if (selectedSlide) {
             onUpdateSlide({ ...selectedSlide, [field]: value });
         }
+    };
+
+    const handleImageSelect = (imageUrl: string) => {
+        if (selectedSlide) {
+            onUpdateSlide({ ...selectedSlide, imageUrl });
+        }
+        setIsImageSearchOpen(false);
     };
     
     const handleContentChange = (index: number, value: string) => {
@@ -390,6 +398,14 @@ const Editor: React.FC<EditorProps> = ({ slides, onUpdateSlide, onFinalize, onBa
                     <div className="flex items-center justify-center h-full text-slate-500">選擇一張投影片以開始編輯</div>
                 ) : (
                     <>
+                        {isImageSearchOpen && (
+                            <ImageSearchModal
+                                isOpen={isImageSearchOpen}
+                                onClose={() => setIsImageSearchOpen(false)}
+                                onImageSelect={handleImageSelect}
+                                initialQuery={selectedSlide.imagePrompt}
+                            />
+                        )}
                         <div className="flex justify-between items-start pb-4 mb-4 border-b border-slate-700">
                            <div>
                                 <h3 className="text-2xl font-bold flex items-center mb-4">
@@ -478,7 +494,7 @@ const Editor: React.FC<EditorProps> = ({ slides, onUpdateSlide, onFinalize, onBa
                                         : `附圖預覽 (位置: ${positionLabels[selectedSlide.imagePosition!] || 'N/A'})`
                                     }
                                 </label>
-                                <div className="flex-grow bg-slate-900 rounded-md overflow-hidden relative">
+                                <div className="flex-grow bg-slate-900 rounded-md overflow-hidden relative group">
                                     {selectedSlide.imageUrl ? (
                                         <img src={selectedSlide.imageUrl} alt={selectedSlide.imagePrompt} className="w-full h-full object-cover" />
                                     ) : (
@@ -488,10 +504,20 @@ const Editor: React.FC<EditorProps> = ({ slides, onUpdateSlide, onFinalize, onBa
                                             </div>
                                         )
                                     )}
-                                     {['bar-chart', 'pie-chart', 'line-chart', 'swot-analysis', 'process-flow', 'circular-diagram', 'hierarchy'].includes(selectedSlide.layout) && (
+                                     {['bar-chart', 'pie-chart', 'line-chart', 'swot-analysis', 'process-flow', 'circular-diagram', 'hierarchy'].includes(selectedSlide.layout) ? (
                                         <div className="w-full h-full flex items-center justify-center text-slate-500 p-4 text-center">
                                             資訊圖表預覽會顯示在最終簡報中。
                                         </div>
+                                     ) : (
+                                        <button 
+                                            onClick={() => setIsImageSearchOpen(true)}
+                                            className="absolute inset-0 w-full h-full flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                                        >
+                                            <div className="flex flex-col items-center text-white bg-slate-800/80 px-4 py-2 rounded-lg">
+                                                <ArrowPathIcon className="w-8 h-8 mb-1" />
+                                                <span className="font-semibold">更換圖片</span>
+                                            </div>
+                                        </button>
                                      )}
                                 </div>
                             </div>

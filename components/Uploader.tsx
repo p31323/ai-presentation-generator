@@ -15,11 +15,16 @@ const Uploader: React.FC<UploaderProps> = ({ onBack, onGenerationStart, onError 
     const [fileName, setFileName] = useState<string | null>(null);
     const [isParsing, setIsParsing] = useState(false);
     const [extractedText, setExtractedText] = useState<string>('');
+    const [isDragging, setIsDragging] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const handleFileChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
+    const processFile = useCallback(async (file: File | null) => {
         if (!file) return;
+
+        if (file.type !== 'application/pdf') {
+            onError("Please upload a valid PDF file.");
+            return;
+        }
 
         setFileName(file.name);
         setIsParsing(true);
@@ -50,6 +55,32 @@ const Uploader: React.FC<UploaderProps> = ({ onBack, onGenerationStart, onError 
 
     }, [onError]);
 
+    const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        processFile(file || null);
+    }, [processFile]);
+    
+    const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(true);
+    };
+
+    const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+    };
+
+    const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        const file = e.dataTransfer.files?.[0];
+        processFile(file || null);
+    };
+
+
     const handleGenerate = () => {
         onGenerationStart(extractedText);
     };
@@ -68,8 +99,11 @@ const Uploader: React.FC<UploaderProps> = ({ onBack, onGenerationStart, onError 
             </div>
 
             <div 
-                className="flex-grow flex flex-col items-center justify-center bg-slate-900/50 rounded-lg p-4 mb-4 ring-1 ring-slate-700 border-2 border-dashed border-slate-600 hover:border-sky-500 transition-colors cursor-pointer"
+                className={`flex-grow flex flex-col items-center justify-center bg-slate-900/50 rounded-lg p-4 mb-4 ring-1 border-2 border-dashed transition-colors cursor-pointer ${isDragging ? 'border-sky-400 ring-sky-400 bg-sky-900/20' : 'border-slate-600 hover:border-sky-500'}`}
                 onClick={triggerFileSelect}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
             >
                 <input type="file" accept=".pdf" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
                 {isParsing ? (
@@ -83,9 +117,9 @@ const Uploader: React.FC<UploaderProps> = ({ onBack, onGenerationStart, onError 
                         <p className="text-slate-400 text-sm mt-2">點擊下方按鈕以生成簡報。</p>
                     </div>
                 ) : (
-                    <div className="text-center text-slate-400">
+                    <div className="text-center text-slate-400 pointer-events-none">
                         <UploadIcon className="w-16 h-16 mx-auto mb-4" />
-                        <p className="font-semibold text-slate-300">點擊此處或拖曳檔案至此</p>
+                        <p className="font-semibold text-slate-300">{isDragging ? '放開檔案以開始上傳' : '點擊此處或拖曳檔案至此'}</p>
                         <p className="text-sm">支援 PDF 格式</p>
                     </div>
                 )}
